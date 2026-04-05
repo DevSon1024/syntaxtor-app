@@ -13,10 +13,11 @@ class SafFileManager(private val context: Context) : FileRepository {
                 it.bufferedReader().readText() 
             } ?: throw Exception("Cannot read file")
             
-            // Extract a rudimentary name for now
             val name = uri.lastPathSegment ?: "unknown"
+            val extension = name.substringAfterLast('.', "")
+            val fileType = if (extension.isNotEmpty()) ".$extension".lowercase() else ""
             
-            Result.success(EditorFile(uri = uri, name = name, content = content))
+            Result.success(EditorFile(uri = uri, name = name, content = content, fileType = fileType))
         } catch (e: Exception) {
             Result.failure(e)
         }

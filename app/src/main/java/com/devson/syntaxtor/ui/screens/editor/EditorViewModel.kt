@@ -97,4 +97,21 @@ class EditorViewModel(
             }
         }
     }
+
+    fun closeTab(index: Int) {
+        val currentState = _uiState.value as? EditorUiState.Ready ?: return
+        if (index !in currentState.openFiles.indices) return
+        
+        val newFiles = currentState.openFiles.toMutableList().apply { removeAt(index) }
+        if (newFiles.isEmpty()) {
+            _uiState.value = EditorUiState.Ready(newFiles, -1, currentState.wordWrapEnabled)
+        } else {
+            val newIndex = if (index <= currentState.selectedFileIndex && currentState.selectedFileIndex > 0) {
+                currentState.selectedFileIndex - 1
+            } else {
+                if (index < currentState.selectedFileIndex) currentState.selectedFileIndex - 1 else currentState.selectedFileIndex
+            }
+            _uiState.value = currentState.copy(openFiles = newFiles, selectedFileIndex = newIndex)
+        }
+    }
 }
