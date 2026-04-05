@@ -13,7 +13,7 @@ sealed class EditAction {
 }
 class EditorEngine {
 
-    /** The live document state — Compose observes this directly. */
+    /** The live document state - Compose observes this directly. */
     val lines: SnapshotStateList<String> = mutableStateListOf("")
 
     private val undoStack = ArrayDeque<EditAction>(MAX_HISTORY)
@@ -37,7 +37,7 @@ class EditorEngine {
     fun getContent(): String = lines.joinToString("\n")
 
     /**
-     * Full replacement from a TextFieldValue string — called on every keystroke from
+     * Full replacement from a TextFieldValue string - called on every keystroke from
      * the BasicTextField composable. Performs a line-level diff to minimise work.
      */
     fun applyFullUpdate(newContent: String, cursorOffset: Int) {

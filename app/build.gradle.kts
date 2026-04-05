@@ -139,6 +139,11 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.play.services.mlkit.subject.segmentation)
+
+    // Sora code editor - high-performance editor with built-in undo/redo and search
+    implementation("io.github.Rosemoe.sora-editor:editor:0.23.6")
+    implementation("io.github.Rosemoe.sora-editor:language-textmate:0.23.6")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

@@ -6,18 +6,14 @@ import androidx.lifecycle.viewModelScope
 import com.devson.syntaxtor.domain.model.EditorFile
 import com.devson.syntaxtor.domain.usecase.OpenFileUseCase
 import com.devson.syntaxtor.domain.usecase.SaveFileUseCase
-import com.devson.syntaxtor.editor.engine.EditorEngine
-import com.devson.syntaxtor.editor.engine.SearchEngine
-import com.devson.syntaxtor.editor.engine.SearchMatch
-import com.devson.syntaxtor.editor.suggestion.WordSuggestionProvider
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import io.github.rosemoe.sora.widget.CodeEditor
+
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.lang.ref.WeakReference
 
 // UI State
 sealed class EditorUiState {
@@ -30,19 +26,13 @@ sealed class EditorUiState {
         val wordWrapEnabled: Boolean = false,
         // Search
         val searchQuery: String = "",
-        val searchMatches: List<SearchMatch> = emptyList(),
+        val searchMatchCount: Int = 0,
         val searchMatchIndex: Int = -1,
         val isSearchVisible: Boolean = false,
-        // Suggestions
-        val suggestions: List<String> = emptyList(),
-        // Undo / Redo availability
-        val canUndo: Boolean = false,
-        val canRedo: Boolean = false
     ) : EditorUiState()
 }
 
 // ViewModel
-@OptIn(FlowPreview::class)
 class EditorViewModel(
     private val openFileUseCase: OpenFileUseCase,
     private val saveFileUseCase: SaveFileUseCase
@@ -51,13 +41,11 @@ class EditorViewModel(
     private val _uiState = MutableStateFlow<EditorUiState>(EditorUiState.Idle)
     val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()
 
-    /** One engine per open tab, keyed by URI string. */
-    private val engines = HashMap<String, EditorEngine>()
-
-    /** Suggestion providers keyed by file-extension. */
-    private val suggestionProviders = HashMap<String, WordSuggestionProvider>()
-
-    private var suggestionJob: Job? = null
+    /**
+     * WeakReference to each tab's CodeEditor, keyed by URI string.
+     * Using WeakReference so we don't leak Views after they are destroyed.
+     */
+    private val editorRefs = HashMap<String, WeakReference<CodeEditor>>()
 
     //  File / Tab operations 
 
@@ -66,20 +54,24 @@ class EditorViewModel(
             _uiState.value = EditorUiState.Loading
             openFileUseCase(uri)
                 .onSuccess { file ->
-                    val engine = EditorEngine().also { it.loadContent(file.content) }
-                    engines[uri.toString()] = engine
-
                     val currentState = _uiState.value
                     val currentFiles = (currentState as? EditorUiState.Ready)?.openFiles ?: emptyList()
                     val isWordWrap = (currentState as? EditorUiState.Ready)?.wordWrapEnabled ?: false
+
+                    // Avoid duplicate tabs
+                    val alreadyOpen = currentFiles.indexOfFirst { it.uri == file.uri }
+                    if (alreadyOpen >= 0) {
+                        _uiState.update {
+                            (it as EditorUiState.Ready).copy(selectedFileIndex = alreadyOpen)
+                        }
+                        return@onSuccess
+                    }
 
                     val newFiles = currentFiles + file
                     _uiState.value = EditorUiState.Ready(
                         openFiles = newFiles,
                         selectedFileIndex = newFiles.lastIndex,
                         wordWrapEnabled = isWordWrap,
-                        canUndo = false,
-                        canRedo = false
                     )
                 }
                 .onFailure { error ->
@@ -91,14 +83,11 @@ class EditorViewModel(
     fun selectTab(index: Int) {
         (_uiState.value as? EditorUiState.Ready)?.let { state ->
             if (index !in state.openFiles.indices) return
-            val engine = engineForIndex(state, index)
             _uiState.update {
                 state.copy(
                     selectedFileIndex = index,
-                    canUndo = engine?.canUndo() ?: false,
-                    canRedo = engine?.canRedo() ?: false,
-                    suggestions = emptyList(),
-                    searchMatches = emptyList(),
+                    searchQuery = "",
+                    searchMatchCount = 0,
                     searchMatchIndex = -1,
                     isSearchVisible = false
                 )
@@ -110,9 +99,8 @@ class EditorViewModel(
         val state = _uiState.value as? EditorUiState.Ready ?: return
         if (index !in state.openFiles.indices) return
 
-        // Clean up engine
         val uri = state.openFiles[index].uri.toString()
-        engines.remove(uri)
+        editorRefs.remove(uri)
 
         val newFiles = state.openFiles.toMutableList().apply { removeAt(index) }
         if (newFiles.isEmpty()) {
@@ -126,113 +114,110 @@ class EditorViewModel(
         }.coerceIn(0, newFiles.lastIndex)
 
         _uiState.update {
-            state.copy(
-                openFiles = newFiles,
-                selectedFileIndex = newIndex
-            )
+            state.copy(openFiles = newFiles, selectedFileIndex = newIndex)
         }
     }
 
-    //  Content editing 
+    //  Editor registration (called from AndroidView factory/update) 
 
     /**
-     * Called by the composable on every keystroke.
-     * Delegates to the engine for line diffing + undo tracking.
-     * Uses debouncing for suggestions.
+     * The composable calls this when the CodeEditor view is created or destroyed for a tab.
+     * Registering null clears the reference.
      */
-    fun updateContent(newContent: String, cursorOffset: Int) {
-        val state = _uiState.value as? EditorUiState.Ready ?: return
-        if (state.selectedFileIndex < 0) return
-
-        val engine = engineForIndex(state, state.selectedFileIndex) ?: return
-        engine.applyFullUpdate(newContent, cursorOffset)
-
-        val currentFile = state.openFiles[state.selectedFileIndex]
-        val updatedFile = currentFile.copy(content = newContent, isModified = true)
-        val newFiles = state.openFiles.toMutableList().apply {
-            set(state.selectedFileIndex, updatedFile)
+    fun registerEditorForFile(uri: String, editor: CodeEditor?) {
+        if (editor == null) {
+            editorRefs.remove(uri)
+        } else {
+            editorRefs[uri] = WeakReference(editor)
         }
+    }
 
-        // Re-run search if active
-        val newMatches = if (state.searchQuery.isNotBlank()) {
-            SearchEngine.findAll(engine.lines, state.searchQuery)
-        } else emptyList()
+    /** Returns the live CodeEditor for the currently selected tab, or null. */
+    fun currentEditor(): CodeEditor? {
+        val state = _uiState.value as? EditorUiState.Ready ?: return null
+        val uri = state.openFiles.getOrNull(state.selectedFileIndex)?.uri?.toString() ?: return null
+        return editorRefs[uri]?.get()
+    }
 
-        _uiState.update {
-            state.copy(
-                openFiles = newFiles,
-                canUndo = engine.canUndo(),
-                canRedo = engine.canRedo(),
-                searchMatches = newMatches,
-                searchMatchIndex = if (newMatches.isEmpty()) -1 else 0
-            )
+    //  Content / Save 
+
+    /**
+     * Marks the current file as modified when the editor content changes.
+     * Sora fires this via ContentChangeEvent; we just keep [isModified] in sync.
+     */
+    fun onContentChanged() {
+        (_uiState.value as? EditorUiState.Ready)?.let { state ->
+            if (state.selectedFileIndex < 0) return
+            val file = state.openFiles.getOrNull(state.selectedFileIndex) ?: return
+            if (file.isModified) return // already marked – avoid redundant recomposition
+            val updated = file.copy(isModified = true)
+            _uiState.update {
+                state.copy(
+                    openFiles = state.openFiles.toMutableList().apply {
+                        set(state.selectedFileIndex, updated)
+                    }
+                )
+            }
         }
-
-        scheduleSuggestions(newContent, cursorOffset, currentFile.fileType)
     }
 
     fun saveCurrentFile() {
         val state = _uiState.value as? EditorUiState.Ready ?: return
         if (state.selectedFileIndex < 0) return
 
-        val currentFile = state.openFiles[state.selectedFileIndex]
+        val file = state.openFiles[state.selectedFileIndex]
+        val editor = currentEditor()
+
+        // Grab latest text from Sora's internal content model
+        val latestContent = editor?.text?.toString() ?: file.content
+
         viewModelScope.launch {
-            saveFileUseCase(currentFile).onSuccess {
-                val updatedFile = currentFile.copy(isModified = false)
-                val newFiles = state.openFiles.toMutableList().apply {
-                    set(state.selectedFileIndex, updatedFile)
+            saveFileUseCase(file.copy(content = latestContent)).onSuccess {
+                val updatedFile = file.copy(content = latestContent, isModified = false)
+                _uiState.update {
+                    state.copy(
+                        openFiles = state.openFiles.toMutableList().apply {
+                            set(state.selectedFileIndex, updatedFile)
+                        }
+                    )
                 }
-                _uiState.update { state.copy(openFiles = newFiles) }
             }
         }
     }
 
     fun toggleWordWrap() {
         (_uiState.value as? EditorUiState.Ready)?.let { state ->
-            _uiState.update { state.copy(wordWrapEnabled = !state.wordWrapEnabled) }
+            val newWrap = !state.wordWrapEnabled
+            _uiState.update { state.copy(wordWrapEnabled = newWrap) }
+            // Apply immediately to the active editor
+            currentEditor()?.isWordwrap = newWrap
         }
     }
 
-    //  Undo / Redo 
+    //  Undo / Redo - delegated to Sora's built-in manager 
 
     fun undo() {
-        val state = _uiState.value as? EditorUiState.Ready ?: return
-        val engine = engineForIndex(state, state.selectedFileIndex) ?: return
-        val newContent = engine.undo() ?: return
-        syncEngineContentToState(state, newContent, engine)
+        currentEditor()?.undo()
     }
 
     fun redo() {
-        val state = _uiState.value as? EditorUiState.Ready ?: return
-        val engine = engineForIndex(state, state.selectedFileIndex) ?: return
-        val newContent = engine.redo() ?: return
-        syncEngineContentToState(state, newContent, engine)
+        currentEditor()?.redo()
     }
 
-    private fun syncEngineContentToState(state: EditorUiState.Ready, newContent: String, engine: EditorEngine) {
-        val currentFile = state.openFiles[state.selectedFileIndex]
-        val updatedFile = currentFile.copy(content = newContent, isModified = true)
-        val newFiles = state.openFiles.toMutableList().apply {
-            set(state.selectedFileIndex, updatedFile)
-        }
-        _uiState.update {
-            state.copy(
-                openFiles = newFiles,
-                canUndo = engine.canUndo(),
-                canRedo = engine.canRedo()
-            )
-        }
-    }
-
-    //  Search 
+    //  Search - delegated to Sora's built-in searcher 
 
     fun toggleSearch() {
         (_uiState.value as? EditorUiState.Ready)?.let { state ->
+            val nowVisible = !state.isSearchVisible
+            if (!nowVisible) {
+                // Clear Sora search highlight when bar is closed
+                currentEditor()?.searcher?.stopSearch()
+            }
             _uiState.update {
                 state.copy(
-                    isSearchVisible = !state.isSearchVisible,
+                    isSearchVisible = nowVisible,
                     searchQuery = "",
-                    searchMatches = emptyList(),
+                    searchMatchCount = 0,
                     searchMatchIndex = -1
                 )
             }
@@ -240,88 +225,26 @@ class EditorViewModel(
     }
 
     fun updateSearchQuery(query: String) {
-        val state = _uiState.value as? EditorUiState.Ready ?: return
-        val engine = engineForIndex(state, state.selectedFileIndex)
-        val matches = if (query.isNotBlank() && engine != null) {
-            SearchEngine.findAll(engine.lines, query)
-        } else emptyList()
-
-        _uiState.update {
-            state.copy(
-                searchQuery = query,
-                searchMatches = matches,
-                searchMatchIndex = if (matches.isEmpty()) -1 else 0
-            )
+        (_uiState.value as? EditorUiState.Ready)?.let { state ->
+            _uiState.update { state.copy(searchQuery = query) }
+            val editor = currentEditor() ?: return
+            if (query.isBlank()) {
+                editor.searcher.stopSearch()
+                _uiState.update { (it as? EditorUiState.Ready)?.copy(searchMatchCount = 0, searchMatchIndex = -1) ?: it }
+            } else {
+                editor.searcher.search(
+                    query,
+                    io.github.rosemoe.sora.widget.EditorSearcher.SearchOptions(false, false)
+                )
+            }
         }
     }
 
     fun nextSearchMatch() {
-        (_uiState.value as? EditorUiState.Ready)?.let { state ->
-            if (state.searchMatches.isEmpty()) return
-            val next = (state.searchMatchIndex + 1) % state.searchMatches.size
-            _uiState.update { state.copy(searchMatchIndex = next) }
-        }
+        currentEditor()?.searcher?.gotoNext()
     }
 
     fun previousSearchMatch() {
-        (_uiState.value as? EditorUiState.Ready)?.let { state ->
-            if (state.searchMatches.isEmpty()) return
-            val prev = (state.searchMatchIndex - 1 + state.searchMatches.size) % state.searchMatches.size
-            _uiState.update { state.copy(searchMatchIndex = prev) }
-        }
-    }
-
-    //  Suggestions 
-
-    fun applySuggestion(suggestion: String, cursorOffset: Int, currentText: String) {
-        val textUntilCursor = currentText.substring(0, cursorOffset.coerceAtMost(currentText.length))
-        val lastWord = textUntilCursor.split(Regex("\\W+")).lastOrNull() ?: ""
-        val newText = currentText.substring(0, cursorOffset - lastWord.length) +
-                suggestion +
-                currentText.substring(cursorOffset.coerceAtMost(currentText.length))
-        val newCursor = cursorOffset - lastWord.length + suggestion.length
-        updateContent(newText, newCursor)
-        clearSuggestions()
-    }
-
-    fun clearSuggestions() {
-        (_uiState.value as? EditorUiState.Ready)?.let { state ->
-            if (state.suggestions.isNotEmpty()) {
-                _uiState.update { state.copy(suggestions = emptyList()) }
-            }
-        }
-    }
-
-    //  Engine access 
-
-    /** Expose the engine for the currently selected file so the UI can read lines. */
-    fun currentEngine(): EditorEngine? {
-        val state = _uiState.value as? EditorUiState.Ready ?: return null
-        return engineForIndex(state, state.selectedFileIndex)
-    }
-
-    //  Private helpers 
-
-    private fun engineForIndex(state: EditorUiState.Ready, index: Int): EditorEngine? {
-        val uri = state.openFiles.getOrNull(index)?.uri?.toString() ?: return null
-        return engines[uri]
-    }
-
-    private fun scheduleSuggestions(content: String, cursorOffset: Int, fileType: String) {
-        suggestionJob?.cancel()
-        suggestionJob = viewModelScope.launch {
-            delay(180L) // 180 ms debounce
-            val provider = suggestionProviders.getOrPut(fileType) { WordSuggestionProvider(fileType) }
-            val safeOffset = cursorOffset.coerceIn(0, content.length)
-            val textUntilCursor = content.substring(0, safeOffset)
-            val lastWord = textUntilCursor.split(Regex("\\W+")).lastOrNull() ?: ""
-            val newSuggestions = if (lastWord.length > 1) {
-                provider.getSuggestions(lastWord)
-            } else emptyList()
-
-            (_uiState.value as? EditorUiState.Ready)?.let { state ->
-                _uiState.update { state.copy(suggestions = newSuggestions) }
-            }
-        }
+        currentEditor()?.searcher?.gotoPrevious()
     }
 }
