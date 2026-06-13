@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.WrapText
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -35,8 +37,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.navigation.NavController
 import com.devson.syntaxtor.domain.model.EditorFile
+import com.devson.syntaxtor.navigation.Screen
 import com.devson.syntaxtor.ui.components.HistoryBottomSheet
 import com.devson.syntaxtor.ui.preview.PreviewPlaceholder
+import com.devson.syntaxtor.ui.utils.formatAsFileName
 import com.devson.syntaxtor.viewmodel.EditorUiState
 import com.devson.syntaxtor.viewmodel.EditorViewModel
 import io.github.rosemoe.sora.event.ContentChangeEvent
@@ -45,9 +49,7 @@ import io.github.rosemoe.sora.widget.EditorSearcher
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
 import io.github.rosemoe.sora.widget.subscribeEvent
 
-// ============================================================================
 // Root Screen
-// ============================================================================
 
 @Composable
 fun EditorScreen(
@@ -57,6 +59,7 @@ fun EditorScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var isPreviewVisible by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     //  BackHandler: auto-save before leaving 
     val readyState = uiState as? EditorUiState.Ready
@@ -64,6 +67,23 @@ fun EditorScreen(
     BackHandler(enabled = currentFile?.isModified == true) {
         viewModel.autoSaveAndPop {
             navController.popBackStack()
+        }
+    }
+
+    // Collect global snackbar messages
+    LaunchedEffect(Unit) {
+        viewModel.snackbarMessage.collect { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    // Auto navigate back to HomeScreen when there are no open files
+    val openFilesCount = (uiState as? EditorUiState.Ready)?.openFiles?.size ?: 0
+    LaunchedEffect(openFilesCount, uiState) {
+        if (uiState is EditorUiState.Idle || (uiState is EditorUiState.Ready && openFilesCount == 0)) {
+            navController.navigate(Screen.Home.route) {
+                popUpTo(Screen.Home.route) { inclusive = true }
+            }
         }
     }
 
@@ -88,16 +108,16 @@ fun EditorScreen(
                 onToggleSearch = { viewModel.toggleSearch() },
                 onUndo = { viewModel.undo() },
                 onRedo = { viewModel.redo() },
-                onToggleVersionHistory = { viewModel.toggleVersionHistory() },
                 onShowHistory = { viewModel.toggleHistorySheet() },
             )
         },
-        contentWindowInsets = WindowInsets.safeDrawing,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        contentWindowInsets = WindowInsets(0.dp),
     ) { paddingValues ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
+                .padding(top = paddingValues.calculateTopPadding())
         ) {
             when (val state = uiState) {
                 is EditorUiState.Idle -> CenterText("No file opened.\nTap ⋮ → Open File to begin.")
@@ -160,9 +180,7 @@ fun EditorScreen(
     }
 }
 
-// ============================================================================
-// Top App Bar — sleek M3 CenterAlignedTopAppBar with overflow menu
-// ============================================================================
+// Top App Bar - sleek M3 CenterAlignedTopAppBar with overflow menu
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -176,12 +194,12 @@ fun EditorTopBar(
     onToggleSearch: () -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
-    onToggleVersionHistory: () -> Unit,
     onShowHistory: () -> Unit,
 ) {
     val readyState = uiState as? EditorUiState.Ready
     val file = readyState?.openFiles?.getOrNull(readyState.selectedFileIndex)
-    val title = file?.let { it.name + if (it.isModified) " •" else "" } ?: "Syntaxtor"
+    // Display only formatted filename in the top bar. If none, show empty.
+    val title = file?.let { it.name.formatAsFileName() + if (it.isModified) " •" else "" } ?: ""
     val showPreview = file?.fileType?.let { it == ".html" || it == ".htm" } ?: false
     var overflowExpanded by remember { mutableStateOf(false) }
 
@@ -236,7 +254,7 @@ fun EditorTopBar(
                         text = { Text("Word wrap") },
                         leadingIcon = {
                             Icon(
-                                Icons.Default.WrapText, null,
+                                Icons.AutoMirrored.Filled.WrapText, null,
                                 tint = if (readyState?.wordWrapEnabled == true)
                                     MaterialTheme.colorScheme.primary
                                 else
@@ -265,27 +283,7 @@ fun EditorTopBar(
                         )
                     }
                     HorizontalDivider()
-                    // Version history toggle
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                if (readyState?.isVersionHistoryEnabled == true)
-                                    "Disable version history"
-                                else
-                                    "Enable version history"
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.History, null,
-                                tint = if (readyState?.isVersionHistoryEnabled == true)
-                                    MaterialTheme.colorScheme.primary
-                                else LocalContentColor.current,
-                            )
-                        },
-                        onClick = { overflowExpanded = false; onToggleVersionHistory() },
-                    )
-                    // Show history sheet
+                    // Show history sheet (only if enabled in settings)
                     DropdownMenuItem(
                         text = { Text("View history") },
                         leadingIcon = { Icon(Icons.Default.Restore, null) },
@@ -310,9 +308,7 @@ fun EditorTopBar(
     )
 }
 
-// ============================================================================
 // Main Editor Content
-// ============================================================================
 
 @Composable
 fun EditorContent(
@@ -368,9 +364,7 @@ fun EditorContent(
     }
 }
 
-// ============================================================================
 // Sora CodeEditor via AndroidView
-// ============================================================================
 
 @Composable
 fun SoraCodeEditor(
@@ -388,6 +382,10 @@ fun SoraCodeEditor(
     val selectionColor  = MaterialTheme.colorScheme.primaryContainer.toArgb()
     val matchColor      = MaterialTheme.colorScheme.tertiaryContainer.toArgb()
 
+    val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val density = LocalDensity.current
+    val navBarPaddingPx = with(density) { navBarPadding.roundToPx() }
+
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { context ->
@@ -395,7 +393,7 @@ fun SoraCodeEditor(
                 setText(file.content)
                 isWordwrap = wordWrap
 
-                // Monospace font at 14sp — IDE standard
+                // Monospace font at 14sp - IDE standard
                 typefaceText = Typeface.MONOSPACE
                 typefaceLineNumber = Typeface.MONOSPACE
                 setTextSize(14f)
@@ -409,6 +407,8 @@ fun SoraCodeEditor(
                     selectionColor  = selectionColor,
                     matchColor      = matchColor,
                 )
+
+                setPadding(paddingLeft, paddingTop, paddingRight, navBarPaddingPx)
 
                 subscribeEvent<ContentChangeEvent> { _, _ ->
                     viewModel.onContentChanged()
@@ -430,6 +430,8 @@ fun SoraCodeEditor(
                 matchColor      = matchColor,
             )
 
+            editor.setPadding(editor.paddingLeft, editor.paddingTop, editor.paddingRight, navBarPaddingPx)
+
             if (isSearchVisible && searchQuery.isNotBlank()) {
                 editor.searcher.search(searchQuery, EditorSearcher.SearchOptions(false, false))
             } else {
@@ -444,7 +446,7 @@ fun SoraCodeEditor(
 }
 
 // ============================================================================
-// Color scheme helper — maps Material3 tokens → Sora's EditorColorScheme
+// Color scheme helper - maps Material3 tokens → Sora's EditorColorScheme
 // ============================================================================
 
 private fun CodeEditor.applyColorScheme(
@@ -546,9 +548,7 @@ fun SearchBar(
     }
 }
 
-// ============================================================================
 // Tab Bar
-// ============================================================================
 
 @Composable
 fun TabBar(
@@ -571,7 +571,7 @@ fun TabBar(
                 text = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = file.name + if (file.isModified) " •" else "",
+                            text = file.name.formatAsFileName() + if (file.isModified) " •" else "",
                             maxLines = 1,
                             fontFamily = FontFamily.Monospace,
                             fontSize = 12.sp,
@@ -592,9 +592,7 @@ fun TabBar(
     }
 }
 
-// ============================================================================
 // Helpers
-// ============================================================================
 
 @Composable
 fun CenterText(text: String) {

@@ -28,7 +28,7 @@ interface HistoryDao {
     suspend fun getAllHistoryForFile(uri: String): List<FileHistoryEntity>
 
     /**
-     * Count of checkpoints for a file — used to decide when to create a new base snapshot.
+     * Count of checkpoints for a file - used to decide when to create a new base snapshot.
      */
     @Query("SELECT COUNT(*) FROM file_history WHERE fileUriString = :uri")
     suspend fun countForFile(uri: String): Int
@@ -40,4 +40,7 @@ interface HistoryDao {
     /** Delete a single checkpoint by ID. */
     @Query("DELETE FROM file_history WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM file_history")
+    suspend fun clearAllHistory()
 }

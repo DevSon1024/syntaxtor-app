@@ -4,7 +4,9 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.devson.syntaxtor.data.db.entity.FileHistoryEntity
+import com.devson.syntaxtor.data.repository.SettingsRepository
 import com.devson.syntaxtor.domain.model.EditorFile
+import com.devson.syntaxtor.domain.usecase.AddRecentFileUseCase
 import com.devson.syntaxtor.domain.usecase.GetHistoryUseCase
 import com.devson.syntaxtor.domain.usecase.OpenFileUseCase
 import com.devson.syntaxtor.domain.usecase.RestoreVersionUseCase
@@ -13,8 +15,11 @@ import com.devson.syntaxtor.domain.usecase.SaveFileUseCase
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.EditorSearcher
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -35,7 +40,7 @@ sealed class EditorUiState {
         val searchMatchIndex: Int = -1,
         val isSearchVisible: Boolean = false,
         // Version history
-        val isVersionHistoryEnabled: Boolean = false,
+        val isVersionHistoryEnabled: Boolean = true,
         val showHistorySheet: Boolean = false,
         val historyEntries: List<FileHistoryEntity> = emptyList(),
         // Save indicator
@@ -50,6 +55,8 @@ class EditorViewModel(
     private val saveCheckpointUseCase: SaveCheckpointUseCase,
     private val getHistoryUseCase: GetHistoryUseCase,
     private val restoreVersionUseCase: RestoreVersionUseCase,
+    private val addRecentFileUseCase: AddRecentFileUseCase,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<EditorUiState>(EditorUiState.Idle)
@@ -58,6 +65,33 @@ class EditorViewModel(
     private val editorRefs = HashMap<String, WeakReference<CodeEditor>>()
 
     private var historyObserveJob: Job? = null
+
+    // Event bus for global Snackbars
+    private val _snackbarMessage = MutableSharedFlow<String>()
+    val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
+
+    // Navigation events
+    sealed interface NavigationEvent {
+        object NavigateToEditor : NavigationEvent
+    }
+
+    private val _navigationEvent = MutableSharedFlow<NavigationEvent>()
+    val navigationEvent: SharedFlow<NavigationEvent> = _navigationEvent.asSharedFlow()
+
+    init {
+        // React to version history enabled setting changes
+        viewModelScope.launch {
+            settingsRepository.versionHistoryEnabled.collect { enabled ->
+                _uiState.update { state ->
+                    if (state is EditorUiState.Ready) {
+                        state.copy(isVersionHistoryEnabled = enabled)
+                    } else {
+                        state
+                    }
+                }
+            }
+        }
+    }
 
     //  File / Tab operations
 
@@ -69,7 +103,7 @@ class EditorViewModel(
                     val currentState = _uiState.value
                     val currentFiles = (currentState as? EditorUiState.Ready)?.openFiles ?: emptyList()
                     val isWordWrap = (currentState as? EditorUiState.Ready)?.wordWrapEnabled ?: false
-                    val histEnabled = (currentState as? EditorUiState.Ready)?.isVersionHistoryEnabled ?: false
+                    val histEnabled = settingsRepository.getVersionHistoryPreference()
 
                     // Avoid duplicate tabs
                     val alreadyOpen = currentFiles.indexOfFirst { it.uri == file.uri }
@@ -78,6 +112,9 @@ class EditorViewModel(
                             (it as EditorUiState.Ready).copy(selectedFileIndex = alreadyOpen)
                         }
                         startObservingHistory(file.uri.toString())
+                        addRecentFileUseCase(file.uri.toString(), file.name, file.fileType)
+                        _navigationEvent.emit(NavigationEvent.NavigateToEditor)
+                        _snackbarMessage.emit("File Opened")
                         return@onSuccess
                     }
 
@@ -89,6 +126,9 @@ class EditorViewModel(
                         isVersionHistoryEnabled = histEnabled,
                     )
                     startObservingHistory(file.uri.toString())
+                    addRecentFileUseCase(file.uri.toString(), file.name, file.fileType)
+                    _navigationEvent.emit(NavigationEvent.NavigateToEditor)
+                    _snackbarMessage.emit("File Opened")
                 }
                 .onFailure { error ->
                     _uiState.value = EditorUiState.Error(error.message ?: "Failed to open file")
@@ -121,6 +161,10 @@ class EditorViewModel(
         editorRefs.remove(uri)
 
         val newFiles = state.openFiles.toMutableList().apply { removeAt(index) }
+        viewModelScope.launch {
+            _snackbarMessage.emit("File Closed")
+        }
+
         if (newFiles.isEmpty()) {
             _uiState.value = EditorUiState.Idle
             return
@@ -195,6 +239,7 @@ class EditorViewModel(
                 if (state.isVersionHistoryEnabled) {
                     saveCheckpointUseCase(file.uri.toString(), latestContent)
                 }
+                _snackbarMessage.emit("File Saved")
             }.onFailure {
                 _uiState.update { s ->
                     (s as? EditorUiState.Ready)?.copy(isSaving = false) ?: s
@@ -233,6 +278,7 @@ class EditorViewModel(
                 if (state.isVersionHistoryEnabled) {
                     saveCheckpointUseCase(file.uri.toString(), latestContent)
                 }
+                _snackbarMessage.emit("File Saved")
             }.onFailure {
                 _uiState.update { s ->
                     (s as? EditorUiState.Ready)?.copy(isSaving = false) ?: s
@@ -250,10 +296,10 @@ class EditorViewModel(
         }
     }
 
-    //  Version History
-    fun toggleVersionHistory() {
-        (_uiState.value as? EditorUiState.Ready)?.let { state ->
-            _uiState.update { state.copy(isVersionHistoryEnabled = !state.isVersionHistoryEnabled) }
+    // Trigger external snackbar message
+    fun triggerSnackbar(message: String) {
+        viewModelScope.launch {
+            _snackbarMessage.emit(message)
         }
     }
 
@@ -271,7 +317,7 @@ class EditorViewModel(
 
     /**
      * Reconstructs the file at [checkpointId] and loads it into the active Sora editor.
-     * Does NOT auto-save — the user should explicitly save after reviewing the restored version.
+     * Does NOT auto-save - the user should explicitly save after reviewing the restored version.
      */
     fun restoreVersion(checkpointId: Long) {
         val state = _uiState.value as? EditorUiState.Ready ?: return
@@ -292,6 +338,7 @@ class EditorViewModel(
                             showHistorySheet = false
                         ) ?: s
                     }
+                    _snackbarMessage.emit("Version Restored")
                 }
         }
     }

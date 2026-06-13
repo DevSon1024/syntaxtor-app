@@ -4,12 +4,15 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
@@ -18,7 +21,12 @@ import androidx.navigation.compose.rememberNavController
 import com.devson.syntaxtor.data.db.AppDatabase
 import com.devson.syntaxtor.data.repository.FileRepository
 import com.devson.syntaxtor.data.repository.HistoryRepository
+import com.devson.syntaxtor.data.repository.RecentFilesRepository
+import com.devson.syntaxtor.data.repository.SettingsRepository
+import com.devson.syntaxtor.domain.usecase.AddRecentFileUseCase
+import com.devson.syntaxtor.domain.usecase.ClearHistoryUseCase
 import com.devson.syntaxtor.domain.usecase.GetHistoryUseCase
+import com.devson.syntaxtor.domain.usecase.GetRecentFilesUseCase
 import com.devson.syntaxtor.domain.usecase.OpenFileUseCase
 import com.devson.syntaxtor.domain.usecase.RestoreVersionUseCase
 import com.devson.syntaxtor.domain.usecase.SaveCheckpointUseCase
@@ -28,6 +36,8 @@ import com.devson.syntaxtor.file.manager.SafFileManager
 import com.devson.syntaxtor.navigation.NavGraph
 import com.devson.syntaxtor.ui.theme.SyntaxtorTheme
 import com.devson.syntaxtor.viewmodel.EditorViewModel
+import com.devson.syntaxtor.viewmodel.HomeViewModel
+import com.devson.syntaxtor.viewmodel.SettingsViewModel
 
 class MainActivity : ComponentActivity() {
 
@@ -47,7 +57,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+        )
 
         //  Dependency injection (manual) 
 
@@ -63,6 +76,15 @@ class MainActivity : ComponentActivity() {
         val getHistoryUseCase = GetHistoryUseCase(historyRepository)
         val restoreVersionUseCase = RestoreVersionUseCase(historyRepository)
 
+        // Recent files
+        val recentFilesRepository = RecentFilesRepository(db.recentFileDao())
+        val getRecentFilesUseCase = GetRecentFilesUseCase(recentFilesRepository)
+        val addRecentFileUseCase = AddRecentFileUseCase(recentFilesRepository)
+
+        // Settings & preferences
+        val settingsRepository = SettingsRepository(applicationContext)
+        val clearHistoryUseCase = ClearHistoryUseCase(historyRepository)
+
         val factory = viewModelFactory {
             initializer {
                 EditorViewModel(
@@ -71,22 +93,45 @@ class MainActivity : ComponentActivity() {
                     saveCheckpointUseCase = saveCheckpointUseCase,
                     getHistoryUseCase = getHistoryUseCase,
                     restoreVersionUseCase = restoreVersionUseCase,
+                    addRecentFileUseCase = addRecentFileUseCase,
+                    settingsRepository = settingsRepository,
+                )
+            }
+            initializer {
+                HomeViewModel(
+                    getRecentFilesUseCase = getRecentFilesUseCase,
+                    recentFilesRepository = recentFilesRepository,
+                )
+            }
+            initializer {
+                SettingsViewModel(
+                    settingsRepository = settingsRepository,
+                    clearHistoryUseCase = clearHistoryUseCase,
                 )
             }
         }
         editorViewModel = ViewModelProvider(this, factory)[EditorViewModel::class.java]
+        val homeViewModel = ViewModelProvider(this, factory)[HomeViewModel::class.java]
+        val settingsViewModel = ViewModelProvider(this, factory)[SettingsViewModel::class.java]
 
         // Handle intents from external file managers
         intent?.let { handleIntent(it) }
 
         setContent {
-            SyntaxtorTheme {
+            val themeState by settingsRepository.theme.collectAsState()
+            val isDarkTheme = when (themeState) {
+                "LIGHT" -> false
+                "DARK" -> true
+                else -> isSystemInDarkTheme()
+            }
+            SyntaxtorTheme(darkTheme = isDarkTheme) {
                 val navController = rememberNavController()
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                Box(modifier = Modifier.fillMaxSize()) {
                     NavGraph(
                         navController = navController,
                         editorViewModel = editorViewModel,
-                        modifier = Modifier.padding(innerPadding),
+                        homeViewModel = homeViewModel,
+                        settingsViewModel = settingsViewModel,
                         onOpenFileSelection = {
                             openFileLauncher.launch(arrayOf("*/*"))
                         },

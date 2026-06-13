@@ -34,6 +34,10 @@ class HistoryRepository(private val dao: HistoryDao) {
     fun observeHistory(uri: String): Flow<List<FileHistoryEntity>> =
         dao.observeHistoryForFile(uri)
 
+    suspend fun clearAllHistory() = withContext(Dispatchers.IO) {
+        dao.clearAllHistory()
+    }
+
     /**
      * Saves a new checkpoint for [uri].
      * Internally decides whether to store a full snapshot or a diff patch.
@@ -45,7 +49,7 @@ class HistoryRepository(private val dao: HistoryDao) {
 
             val patchJson: String
             if (isBase) {
-                // Full-text baseline — no diffing needed.
+                // Full-text baseline - no diffing needed.
                 patchJson = currentContent
             } else {
                 // Get all existing checkpoints and reconstruct the last saved text.

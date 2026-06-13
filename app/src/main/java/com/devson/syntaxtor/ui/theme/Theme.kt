@@ -79,7 +79,7 @@ private val SyntaxtorLightColorScheme = lightColorScheme(
 @Composable
 fun SyntaxtorTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color disabled — we use a branded IDE palette.
+    // Dynamic color disabled - we use a branded IDE palette.
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
@@ -89,8 +89,11 @@ fun SyntaxtorTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as? Activity)?.window ?: return@SideEffect
-            window.statusBarColor = colorScheme.background.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            val insetsController = WindowCompat.getInsetsController(window, view)
+            insetsController.isAppearanceLightStatusBars = !darkTheme
+            insetsController.isAppearanceLightNavigationBars = !darkTheme
         }
     }
 

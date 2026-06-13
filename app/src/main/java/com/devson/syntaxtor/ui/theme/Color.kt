@@ -4,16 +4,16 @@ import androidx.compose.ui.graphics.Color
 
 //  Brand palette 
 
-// Accent — Azure-inspired blue (VS Code / GitHub Actions feel)
+// Accent - Azure-inspired blue (VS Code / GitHub Actions feel)
 val AccentBlue        = Color(0xFF0078D4)
 val AccentBlueDark    = Color(0xFF4DA3FF)   // softer on dark backgrounds
 val AccentBlueLight   = Color(0xFF005A9E)   // deeper on light backgrounds
 
-// Secondary — Muted slate
+// Secondary - Muted slate
 val SlateLight        = Color(0xFF6B7A8D)
 val SlateDark         = Color(0xFF8D9BAA)
 
-// Tertiary — Editor-token green (like VS Code string literals)
+// Tertiary - Editor-token green (like VS Code string literals)
 val TokenGreen        = Color(0xFF4EC994)
 val TokenGreenDark    = Color(0xFF89D9B4)
 
