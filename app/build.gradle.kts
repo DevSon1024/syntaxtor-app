@@ -144,6 +144,14 @@ dependencies {
     implementation("io.github.Rosemoe.sora-editor:editor:0.23.6")
     implementation("io.github.Rosemoe.sora-editor:language-textmate:0.23.6")
 
+    // Room database for local version history
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+
+    // Diff-utils for delta-based version history (pure Java, no transitive deps)
+    implementation("io.github.java-diff-utils:java-diff-utils:4.12")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

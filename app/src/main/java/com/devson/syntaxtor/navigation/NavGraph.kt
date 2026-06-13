@@ -14,20 +14,21 @@ fun NavGraph(
     editorViewModel: EditorViewModel,
     modifier: Modifier = Modifier,
     onOpenFileSelection: () -> Unit,
-    startDestination: String = Screen.Editor.route
+    startDestination: String = Screen.Editor.route,
 ) {
     NavHost(
         navController = navController,
         startDestination = startDestination,
-        modifier = modifier
+        modifier = modifier,
     ) {
         composable(Screen.Editor.route) {
             EditorScreen(
+                navController = navController,
                 viewModel = editorViewModel,
-                onOpenFileSelection = onOpenFileSelection
+                onOpenFileSelection = onOpenFileSelection,
             )
         }
-        
+
         composable(Screen.Settings.route) {
             // Settings screen placeholder
         }

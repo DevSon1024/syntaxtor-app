@@ -15,47 +15,68 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.compose.rememberNavController
+import com.devson.syntaxtor.data.db.AppDatabase
 import com.devson.syntaxtor.data.repository.FileRepository
+import com.devson.syntaxtor.data.repository.HistoryRepository
+import com.devson.syntaxtor.domain.usecase.GetHistoryUseCase
 import com.devson.syntaxtor.domain.usecase.OpenFileUseCase
+import com.devson.syntaxtor.domain.usecase.RestoreVersionUseCase
+import com.devson.syntaxtor.domain.usecase.SaveCheckpointUseCase
 import com.devson.syntaxtor.domain.usecase.SaveFileUseCase
 import com.devson.syntaxtor.file.intent.FileIntentHandler
 import com.devson.syntaxtor.file.manager.SafFileManager
 import com.devson.syntaxtor.navigation.NavGraph
-import com.devson.syntaxtor.viewmodel.EditorViewModel
 import com.devson.syntaxtor.ui.theme.SyntaxtorTheme
+import com.devson.syntaxtor.viewmodel.EditorViewModel
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var editorViewModel: EditorViewModel
 
-    // Launcher for handling standard SAF "Open File" requests
-    private val openFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        uri?.let {
-            contentResolver.takePersistableUriPermission(
-                it,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-            editorViewModel.openFile(it)
+    // Launcher for SAF "Open File" requests
+    private val openFileLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            uri?.let {
+                contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+                editorViewModel.openFile(it)
+            }
         }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Setup Manual Dependency Injection
+        // ── Dependency injection (manual) ──────────────────────────────────
+
+        // File I/O
         val fileRepository: FileRepository = SafFileManager(applicationContext)
         val openFileUseCase = OpenFileUseCase(fileRepository)
         val saveFileUseCase = SaveFileUseCase(fileRepository)
 
+        // Version history
+        val db = AppDatabase.getInstance(applicationContext)
+        val historyRepository = HistoryRepository(db.historyDao())
+        val saveCheckpointUseCase = SaveCheckpointUseCase(historyRepository)
+        val getHistoryUseCase = GetHistoryUseCase(historyRepository)
+        val restoreVersionUseCase = RestoreVersionUseCase(historyRepository)
+
         val factory = viewModelFactory {
             initializer {
-                EditorViewModel(openFileUseCase, saveFileUseCase)
+                EditorViewModel(
+                    openFileUseCase = openFileUseCase,
+                    saveFileUseCase = saveFileUseCase,
+                    saveCheckpointUseCase = saveCheckpointUseCase,
+                    getHistoryUseCase = getHistoryUseCase,
+                    restoreVersionUseCase = restoreVersionUseCase,
+                )
             }
         }
         editorViewModel = ViewModelProvider(this, factory)[EditorViewModel::class.java]
 
-        // Process intents launched from outside the app (e.g., File Manager)
+        // Handle intents from external file managers
         intent?.let { handleIntent(it) }
 
         setContent {
@@ -68,7 +89,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.padding(innerPadding),
                         onOpenFileSelection = {
                             openFileLauncher.launch(arrayOf("*/*"))
-                        }
+                        },
                     )
                 }
             }
