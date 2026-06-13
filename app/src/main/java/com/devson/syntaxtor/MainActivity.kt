@@ -49,7 +49,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // ── Dependency injection (manual) ──────────────────────────────────
+        //  Dependency injection (manual) 
 
         // File I/O
         val fileRepository: FileRepository = SafFileManager(applicationContext)

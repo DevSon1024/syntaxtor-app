@@ -2,7 +2,7 @@ package com.devson.syntaxtor.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// ── Brand palette ──────────────────────────────────────────────────────────
+//  Brand palette 
 
 // Accent — Azure-inspired blue (VS Code / GitHub Actions feel)
 val AccentBlue        = Color(0xFF0078D4)
@@ -17,7 +17,7 @@ val SlateDark         = Color(0xFF8D9BAA)
 val TokenGreen        = Color(0xFF4EC994)
 val TokenGreenDark    = Color(0xFF89D9B4)
 
-// ── Dark theme  (GitHub Dark inspired: #0D1117 base) ───────────────────────
+//  Dark theme  (GitHub Dark inspired: #0D1117 base) 
 
 val DarkBackground    = Color(0xFF0D1117)   // editor canvas
 val DarkSurface       = Color(0xFF161B22)   // cards, sheets, dialogs
@@ -27,7 +27,7 @@ val DarkOnSurface     = Color(0xFFCDD9E5)   // secondary text
 val DarkOnSurfaceVar  = Color(0xFF768390)   // hints, line numbers
 val DarkOutline       = Color(0xFF30363D)   // borders / dividers
 
-// ── Light theme  (VS Code Light inspired) ─────────────────────────────────
+//  Light theme  (VS Code Light inspired) 
 
 val LightBackground   = Color(0xFFFFFFFF)
 val LightSurface      = Color(0xFFF3F3F3)
@@ -37,7 +37,7 @@ val LightOnSurface    = Color(0xFF3B3B3B)
 val LightOnSurfaceVar = Color(0xFF737373)   // line numbers / hints
 val LightOutline      = Color(0xFFCCCCCC)
 
-// ── Kept for any remaining code that references the old names ──────────────
+//  Kept for any remaining code that references the old names 
 val Purple80          = Color(0xFFD0BCFF)
 val PurpleGrey80      = Color(0xFFCCC2DC)
 val Pink80            = Color(0xFFEFB8C8)

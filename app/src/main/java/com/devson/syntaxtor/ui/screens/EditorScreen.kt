@@ -58,7 +58,7 @@ fun EditorScreen(
     val uiState by viewModel.uiState.collectAsState()
     var isPreviewVisible by remember { mutableStateOf(false) }
 
-    // ── BackHandler: auto-save before leaving ──────────────────────────────
+    //  BackHandler: auto-save before leaving 
     val readyState = uiState as? EditorUiState.Ready
     val currentFile = readyState?.openFiles?.getOrNull(readyState.selectedFileIndex)
     BackHandler(enabled = currentFile?.isModified == true) {
@@ -67,7 +67,7 @@ fun EditorScreen(
         }
     }
 
-    // ── History bottom sheet ───────────────────────────────────────────────
+    //  History bottom sheet 
     if (readyState?.showHistorySheet == true) {
         HistoryBottomSheet(
             entries = readyState.historyEntries,
@@ -123,7 +123,7 @@ fun EditorScreen(
                 }
             }
 
-            // ── "Saving…" banner (slides in from top of content area) ──────
+            //  "Saving…" banner (slides in from top of content area) 
             AnimatedVisibility(
                 visible = (uiState as? EditorUiState.Ready)?.isSaving == true,
                 enter = slideInVertically { -it } + fadeIn(),
@@ -196,7 +196,7 @@ fun EditorTopBar(
                 ),
             )
         },
-        // ── Primary actions (always visible) ──────────────────────────────
+        //  Primary actions (always visible) 
         actions = {
             IconButton(onClick = onUndo) {
                 Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
@@ -208,7 +208,7 @@ fun EditorTopBar(
                 Icon(Icons.Default.Save, contentDescription = "Save")
             }
 
-            // ── Overflow menu (secondary actions) ─────────────────────────
+            //  Overflow menu (secondary actions) 
             Box {
                 IconButton(onClick = { overflowExpanded = true }) {
                     Icon(Icons.Default.MoreVert, contentDescription = "More options")

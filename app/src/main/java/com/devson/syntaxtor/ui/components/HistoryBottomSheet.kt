@@ -49,7 +49,7 @@ fun HistoryBottomSheet(
                 .fillMaxWidth()
                 .navigationBarsPadding()
         ) {
-            // ── Header ────────────────────────────────────────────────────
+            //  Header 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

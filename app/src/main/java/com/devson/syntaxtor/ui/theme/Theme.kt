@@ -12,7 +12,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// ── Dark color scheme  (GitHub Dark) ──────────────────────────────────────
+//  Dark color scheme  (GitHub Dark) 
 private val SyntaxtorDarkColorScheme = darkColorScheme(
     primary             = AccentBlueDark,
     onPrimary           = DarkBackground,
@@ -44,7 +44,7 @@ private val SyntaxtorDarkColorScheme = darkColorScheme(
     onError             = DarkBackground,
 )
 
-// ── Light color scheme  (VS Code Light) ───────────────────────────────────
+//  Light color scheme  (VS Code Light) 
 private val SyntaxtorLightColorScheme = lightColorScheme(
     primary             = AccentBlueLight,
     onPrimary           = LightBackground,

@@ -20,9 +20,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.lang.ref.WeakReference
 
-// ---------------------------------------------------------------------------
 // UI State
-// ---------------------------------------------------------------------------
 sealed class EditorUiState {
     object Idle : EditorUiState()
     object Loading : EditorUiState()
@@ -45,9 +43,7 @@ sealed class EditorUiState {
     ) : EditorUiState()
 }
 
-// ---------------------------------------------------------------------------
 // ViewModel
-// ---------------------------------------------------------------------------
 class EditorViewModel(
     private val openFileUseCase: OpenFileUseCase,
     private val saveFileUseCase: SaveFileUseCase,
@@ -59,18 +55,11 @@ class EditorViewModel(
     private val _uiState = MutableStateFlow<EditorUiState>(EditorUiState.Idle)
     val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()
 
-    /**
-     * WeakReference to each tab's CodeEditor, keyed by URI string.
-     * WeakReference prevents View leaks after the composable leaves composition.
-     */
     private val editorRefs = HashMap<String, WeakReference<CodeEditor>>()
 
-    /** Active collection job for history, cancelled when the file changes. */
     private var historyObserveJob: Job? = null
 
-    // -----------------------------------------------------------------------
     //  File / Tab operations
-    // -----------------------------------------------------------------------
 
     fun openFile(uri: Uri) {
         viewModelScope.launch {
@@ -148,10 +137,7 @@ class EditorViewModel(
         startObservingHistory(newFiles[newIndex].uri.toString())
     }
 
-    // -----------------------------------------------------------------------
     //  Editor registration (called from AndroidView factory/update)
-    // -----------------------------------------------------------------------
-
     fun registerEditorForFile(uri: String, editor: CodeEditor?) {
         if (editor == null) editorRefs.remove(uri)
         else editorRefs[uri] = WeakReference(editor)
@@ -163,15 +149,12 @@ class EditorViewModel(
         return editorRefs[uri]?.get()
     }
 
-    // -----------------------------------------------------------------------
     //  Content / Save
-    // -----------------------------------------------------------------------
-
     fun onContentChanged() {
         (_uiState.value as? EditorUiState.Ready)?.let { state ->
             if (state.selectedFileIndex < 0) return
             val file = state.openFiles.getOrNull(state.selectedFileIndex) ?: return
-            if (file.isModified) return // already marked – avoid redundant recomposition
+            if (file.isModified) return // already marked - avoid redundant recomposition
             val updated = file.copy(isModified = true)
             _uiState.update {
                 state.copy(
@@ -267,10 +250,7 @@ class EditorViewModel(
         }
     }
 
-    // -----------------------------------------------------------------------
     //  Version History
-    // -----------------------------------------------------------------------
-
     fun toggleVersionHistory() {
         (_uiState.value as? EditorUiState.Ready)?.let { state ->
             _uiState.update { state.copy(isVersionHistoryEnabled = !state.isVersionHistoryEnabled) }
@@ -327,16 +307,12 @@ class EditorViewModel(
         }
     }
 
-    // -----------------------------------------------------------------------
     //  Undo / Redo  (delegated to Sora's built-in manager)
-    // -----------------------------------------------------------------------
 
     fun undo() { currentEditor()?.undo() }
     fun redo() { currentEditor()?.redo() }
 
-    // -----------------------------------------------------------------------
     //  Search  (delegated to Sora's built-in searcher)
-    // -----------------------------------------------------------------------
 
     fun toggleSearch() {
         (_uiState.value as? EditorUiState.Ready)?.let { state ->
