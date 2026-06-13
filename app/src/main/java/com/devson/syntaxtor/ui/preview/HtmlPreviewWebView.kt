@@ -1,4 +1,4 @@
-package com.devson.syntaxtor.preview
+package com.devson.syntaxtor.ui.preview
 
 import android.webkit.WebView
 import android.webkit.WebViewClient

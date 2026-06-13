@@ -1,4 +1,4 @@
-package com.devson.syntaxtor.ui.screens.editor
+package com.devson.syntaxtor.ui.screens
 
 import android.graphics.Typeface
 import androidx.compose.animation.AnimatedVisibility
@@ -33,10 +33,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.devson.syntaxtor.domain.model.EditorFile
-import com.devson.syntaxtor.preview.PreviewPlaceholder
+import com.devson.syntaxtor.ui.preview.PreviewPlaceholder
+import com.devson.syntaxtor.viewmodel.EditorUiState
+import com.devson.syntaxtor.viewmodel.EditorViewModel
 import io.github.rosemoe.sora.event.ContentChangeEvent
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.EditorSearcher
+import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
 import io.github.rosemoe.sora.widget.subscribeEvent
 
 // Root Screen
@@ -320,14 +323,14 @@ private fun CodeEditor.applyColorScheme(
     matchColor: Int
 ) {
     val scheme = colorScheme
-    scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.WHOLE_BACKGROUND, backgroundColor)
-    scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.TEXT_NORMAL, textColor)
-    scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.LINE_NUMBER_BACKGROUND, lineNumBgColor)
-    scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.LINE_NUMBER, lineNumColor)
-    scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.SELECTION_INSERT, cursorColor)
-    scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.SELECTION_HANDLE, cursorColor)
-    scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.SELECTED_TEXT_BACKGROUND, selectionColor)
-    scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.MATCHED_TEXT_BACKGROUND, matchColor)
+    scheme.setColor(EditorColorScheme.WHOLE_BACKGROUND, backgroundColor)
+    scheme.setColor(EditorColorScheme.TEXT_NORMAL, textColor)
+    scheme.setColor(EditorColorScheme.LINE_NUMBER_BACKGROUND, lineNumBgColor)
+    scheme.setColor(EditorColorScheme.LINE_NUMBER, lineNumColor)
+    scheme.setColor(EditorColorScheme.SELECTION_INSERT, cursorColor)
+    scheme.setColor(EditorColorScheme.SELECTION_HANDLE, cursorColor)
+    scheme.setColor(EditorColorScheme.SELECTED_TEXT_BACKGROUND, selectionColor)
+    scheme.setColor(EditorColorScheme.MATCHED_TEXT_BACKGROUND, matchColor)
     // setColor() automatically triggers a redraw; no explicit notify needed.
     invalidate()
 }

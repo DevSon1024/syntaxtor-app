@@ -21,7 +21,7 @@ import com.devson.syntaxtor.domain.usecase.SaveFileUseCase
 import com.devson.syntaxtor.file.intent.FileIntentHandler
 import com.devson.syntaxtor.file.manager.SafFileManager
 import com.devson.syntaxtor.navigation.NavGraph
-import com.devson.syntaxtor.ui.screens.editor.EditorViewModel
+import com.devson.syntaxtor.viewmodel.EditorViewModel
 import com.devson.syntaxtor.ui.theme.SyntaxtorTheme
 
 class MainActivity : ComponentActivity() {

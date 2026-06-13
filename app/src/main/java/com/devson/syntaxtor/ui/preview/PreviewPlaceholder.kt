@@ -1,4 +1,4 @@
-package com.devson.syntaxtor.preview
+package com.devson.syntaxtor.ui.preview
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box

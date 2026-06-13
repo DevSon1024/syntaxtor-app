@@ -1,4 +1,4 @@
-package com.devson.syntaxtor.ui.screens.editor
+package com.devson.syntaxtor.viewmodel
 
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -7,7 +7,7 @@ import com.devson.syntaxtor.domain.model.EditorFile
 import com.devson.syntaxtor.domain.usecase.OpenFileUseCase
 import com.devson.syntaxtor.domain.usecase.SaveFileUseCase
 import io.github.rosemoe.sora.widget.CodeEditor
-
+import io.github.rosemoe.sora.widget.EditorSearcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -234,7 +234,7 @@ class EditorViewModel(
             } else {
                 editor.searcher.search(
                     query,
-                    io.github.rosemoe.sora.widget.EditorSearcher.SearchOptions(false, false)
+                    EditorSearcher.SearchOptions(false, false)
                 )
             }
         }
