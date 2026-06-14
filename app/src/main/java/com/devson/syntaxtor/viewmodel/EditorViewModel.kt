@@ -45,6 +45,8 @@ sealed class EditorUiState {
         val historyEntries: List<FileHistoryEntity> = emptyList(),
         // Save indicator
         val isSaving: Boolean = false,
+        // File currently pending close confirmation dialog
+        val filePendingClose: EditorFile? = null,
     ) : EditorUiState()
 }
 
@@ -179,6 +181,81 @@ class EditorViewModel(
             state.copy(openFiles = newFiles, selectedFileIndex = newIndex)
         }
         startObservingHistory(newFiles[newIndex].uri.toString())
+    }
+
+    fun closeFile(uri: String) {
+        val state = _uiState.value as? EditorUiState.Ready ?: return
+        val index = state.openFiles.indexOfFirst { it.uri.toString() == uri }
+        if (index >= 0) {
+            closeTab(index)
+        }
+    }
+
+    fun requestCloseFile(uri: String) {
+        val state = _uiState.value as? EditorUiState.Ready ?: return
+        val file = state.openFiles.find { it.uri.toString() == uri } ?: return
+        if (file.isModified) {
+            _uiState.update { state.copy(filePendingClose = file) }
+        } else {
+            closeFile(uri)
+        }
+    }
+
+    fun cancelCloseFile() {
+        _uiState.update { state ->
+            if (state is EditorUiState.Ready) {
+                state.copy(filePendingClose = null)
+            } else {
+                state
+            }
+        }
+    }
+
+    fun discardAndCloseFile(uri: String) {
+        closeFile(uri)
+        _uiState.update { state ->
+            if (state is EditorUiState.Ready) {
+                state.copy(filePendingClose = null)
+            } else {
+                state
+            }
+        }
+    }
+
+    fun saveAndCloseFile(uri: String) {
+        val state = _uiState.value as? EditorUiState.Ready ?: return
+        val file = state.openFiles.find { it.uri.toString() == uri } ?: return
+        val latestContent = currentEditor()?.text?.toString() ?: file.content
+
+        _uiState.update { (it as? EditorUiState.Ready)?.copy(isSaving = true) ?: it }
+
+        viewModelScope.launch {
+            saveFileUseCase(file.copy(content = latestContent)).onSuccess {
+                val updatedFile = file.copy(content = latestContent, isModified = false)
+                _uiState.update { s ->
+                    if (s is EditorUiState.Ready) {
+                        val newFiles = s.openFiles.toMutableList().apply {
+                            val idx = indexOfFirst { it.uri.toString() == uri }
+                            if (idx >= 0) {
+                                set(idx, updatedFile)
+                            }
+                        }
+                        s.copy(openFiles = newFiles, isSaving = false, filePendingClose = null)
+                    } else {
+                        s
+                    }
+                }
+                closeFile(uri)
+                if (state.isVersionHistoryEnabled) {
+                    saveCheckpointUseCase(file.uri.toString(), latestContent)
+                }
+                _snackbarMessage.emit("File Saved & Closed")
+            }.onFailure {
+                _uiState.update { s ->
+                    (s as? EditorUiState.Ready)?.copy(isSaving = false) ?: s
+                }
+            }
+        }
     }
 
     //  Editor registration (called from AndroidView factory/update)
@@ -394,6 +471,19 @@ class EditorViewModel(
         }
     }
 
-    fun nextSearchMatch() { currentEditor()?.searcher?.gotoNext() }
-    fun previousSearchMatch() { currentEditor()?.searcher?.gotoPrevious() }
+    fun nextSearchMatch() {
+        try {
+            currentEditor()?.searcher?.gotoNext()
+        } catch (e: IllegalStateException) {
+            triggerSnackbar("No search pattern set")
+        }
+    }
+
+    fun previousSearchMatch() {
+        try {
+            currentEditor()?.searcher?.gotoPrevious()
+        } catch (e: IllegalStateException) {
+            triggerSnackbar("No search pattern set")
+        }
+    }
 }

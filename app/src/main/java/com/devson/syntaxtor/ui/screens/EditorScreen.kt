@@ -9,8 +9,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -24,11 +26,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -61,13 +65,22 @@ fun EditorScreen(
     var isPreviewVisible by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    //  BackHandler: auto-save before leaving 
     val readyState = uiState as? EditorUiState.Ready
     val currentFile = readyState?.openFiles?.getOrNull(readyState.selectedFileIndex)
-    BackHandler(enabled = currentFile?.isModified == true) {
-        viewModel.autoSaveAndPop {
-            navController.popBackStack()
+
+    // Unsaved changes back logic
+    val handleBack: () -> Unit = {
+        if (currentFile?.isModified == true) {
+            viewModel.requestCloseFile(currentFile.uri.toString())
+        } else {
+            navController.popBackStack(Screen.Home.route, false)
+            Unit
         }
+    }
+
+    //  BackHandler
+    BackHandler(enabled = true) {
+        handleBack()
     }
 
     // Collect global snackbar messages
@@ -78,13 +91,45 @@ fun EditorScreen(
     }
 
     // Auto navigate back to HomeScreen when there are no open files
-    val openFilesCount = (uiState as? EditorUiState.Ready)?.openFiles?.size ?: 0
+    val openFilesCount = readyState?.openFiles?.size ?: 0
     LaunchedEffect(openFilesCount, uiState) {
         if (uiState is EditorUiState.Idle || (uiState is EditorUiState.Ready && openFilesCount == 0)) {
             navController.navigate(Screen.Home.route) {
                 popUpTo(Screen.Home.route) { inclusive = true }
             }
         }
+    }
+
+    // Unsaved Changes Confirmation Dialog
+    val filePendingClose = readyState?.filePendingClose
+    if (filePendingClose != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.cancelCloseFile() },
+            title = { Text("Unsaved Changes") },
+            text = { Text("Do you want to save changes to \"${filePendingClose.name.formatAsFileName()}\" before closing?") },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.saveAndCloseFile(filePendingClose.uri.toString()) }
+                ) {
+                    Text("Save & Close")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = { viewModel.discardAndCloseFile(filePendingClose.uri.toString()) }
+                    ) {
+                        Text("Close Without Saving", color = MaterialTheme.colorScheme.error)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { viewModel.cancelCloseFile() }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        )
     }
 
     //  History bottom sheet 
@@ -101,14 +146,18 @@ fun EditorScreen(
             EditorTopBar(
                 uiState = uiState,
                 onSave = { viewModel.saveCurrentFile() },
-                onWordWrapToggle = { viewModel.toggleWordWrap() },
                 onOpenFile = onOpenFileSelection,
                 isPreviewVisible = isPreviewVisible,
                 onPreviewToggle = { isPreviewVisible = !isPreviewVisible },
-                onToggleSearch = { viewModel.toggleSearch() },
                 onUndo = { viewModel.undo() },
                 onRedo = { viewModel.redo() },
-                onShowHistory = { viewModel.toggleHistorySheet() },
+                onBackClick = handleBack,
+                onTabSelected = { viewModel.selectTab(it) },
+                onTabClosed = { index ->
+                    readyState?.openFiles?.getOrNull(index)?.let { file ->
+                        viewModel.requestCloseFile(file.uri.toString())
+                    }
+                }
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -120,7 +169,7 @@ fun EditorScreen(
                 .padding(top = paddingValues.calculateTopPadding())
         ) {
             when (val state = uiState) {
-                is EditorUiState.Idle -> CenterText("No file opened.\nTap ⋮ → Open File to begin.")
+                is EditorUiState.Idle -> CenterText("No file opened.\nTap Open File button to begin.")
                 is EditorUiState.Loading -> CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center)
                 )
@@ -133,12 +182,68 @@ fun EditorScreen(
                             state = state,
                             viewModel = viewModel,
                             onTabSelected = { viewModel.selectTab(it) },
-                            onTabClosed = { viewModel.closeTab(it) },
+                            onTabClosed = { index ->
+                                state.openFiles.getOrNull(index)?.let { file ->
+                                    viewModel.requestCloseFile(file.uri.toString())
+                                }
+                            },
                             onSearchQueryChange = { viewModel.updateSearchQuery(it) },
                             onNextMatch = { viewModel.nextSearchMatch() },
                             onPrevMatch = { viewModel.previousSearchMatch() },
                             isPreviewVisible = isPreviewVisible,
                         )
+                    }
+                }
+            }
+
+            // Bottom Options Island
+            if (readyState != null && readyState.openFiles.isNotEmpty()) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 16.dp)
+                        .windowInsetsPadding(WindowInsets.ime)
+                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .wrapContentSize(),
+                    shape = RoundedCornerShape(percent = 50),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    tonalElevation = 8.dp,
+                    shadowElevation = 6.dp
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
+                        IconButton(onClick = onOpenFileSelection) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = "Open File")
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        IconButton(onClick = { viewModel.toggleSearch() }) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Find in File",
+                                tint = if (readyState.isSearchVisible) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        IconButton(onClick = { viewModel.toggleWordWrap() }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.WrapText,
+                                contentDescription = "Word Wrap",
+                                tint = if (readyState.wordWrapEnabled) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        IconButton(
+                            onClick = { viewModel.toggleHistorySheet() },
+                            enabled = readyState.isVersionHistoryEnabled
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = "View History"
+                            )
+                        }
                     }
                 }
             }
@@ -187,125 +292,86 @@ fun EditorScreen(
 fun EditorTopBar(
     uiState: EditorUiState,
     onSave: () -> Unit,
-    onWordWrapToggle: () -> Unit,
     onOpenFile: () -> Unit,
     isPreviewVisible: Boolean,
     onPreviewToggle: () -> Unit,
-    onToggleSearch: () -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
-    onShowHistory: () -> Unit,
+    onBackClick: () -> Unit,
+    onTabSelected: (Int) -> Unit,
+    onTabClosed: (Int) -> Unit,
 ) {
     val readyState = uiState as? EditorUiState.Ready
-    val file = readyState?.openFiles?.getOrNull(readyState.selectedFileIndex)
-    // Display only formatted filename in the top bar. If none, show empty.
-    val title = file?.let { it.name.formatAsFileName() + if (it.isModified) " •" else "" } ?: ""
+    val files = readyState?.openFiles ?: emptyList()
+    val selectedIndex = readyState?.selectedFileIndex ?: -1
+    val file = readyState?.openFiles?.getOrNull(selectedIndex)
     val showPreview = file?.fileType?.let { it == ".html" || it == ".htm" } ?: false
     var overflowExpanded by remember { mutableStateOf(false) }
 
-    CenterAlignedTopAppBar(
-        title = {
-            Text(
-                text = title,
-                maxLines = 1,
-                style = MaterialTheme.typography.titleSmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurface,
-                ),
-            )
-        },
-        //  Primary actions (always visible) 
-        actions = {
-            IconButton(onClick = onUndo) {
-                Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
-            }
-            IconButton(onClick = onRedo) {
-                Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
-            }
-            IconButton(onClick = onSave) {
-                Icon(Icons.Default.Save, contentDescription = "Save")
-            }
+    Column {
+        CenterAlignedTopAppBar(
+            title = { }, // Title is empty; file names are now managed in tabs below
+            navigationIcon = {
+                IconButton(onClick = onBackClick) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back"
+                    )
+                }
+            },
+            //  Primary actions (always visible) 
+            actions = {
+                IconButton(onClick = onUndo) {
+                    Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
+                }
+                IconButton(onClick = onRedo) {
+                    Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
+                }
+                IconButton(onClick = onSave) {
+                    Icon(Icons.Default.Save, contentDescription = "Save")
+                }
 
-            //  Overflow menu (secondary actions) 
-            Box {
-                IconButton(onClick = { overflowExpanded = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                }
-                DropdownMenu(
-                    expanded = overflowExpanded,
-                    onDismissRequest = { overflowExpanded = false },
-                ) {
-                    // Search
-                    DropdownMenuItem(
-                        text = { Text("Find in file") },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.Search, null,
-                                tint = if (readyState?.isSearchVisible == true)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    LocalContentColor.current,
+                // Overflow menu for extra actions (e.g. preview)
+                if (showPreview) {
+                    Box {
+                        IconButton(onClick = { overflowExpanded = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                        }
+                        DropdownMenu(
+                            expanded = overflowExpanded,
+                            onDismissRequest = { overflowExpanded = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(if (isPreviewVisible) "Hide preview" else "Show preview") },
+                                leadingIcon = {
+                                    Icon(
+                                        if (isPreviewVisible) Icons.Default.VisibilityOff
+                                        else Icons.Default.Visibility, null
+                                    )
+                                },
+                                onClick = { overflowExpanded = false; onPreviewToggle() },
                             )
-                        },
-                        onClick = { overflowExpanded = false; onToggleSearch() },
-                    )
-                    // Word wrap
-                    DropdownMenuItem(
-                        text = { Text("Word wrap") },
-                        leadingIcon = {
-                            Icon(
-                                Icons.AutoMirrored.Filled.WrapText, null,
-                                tint = if (readyState?.wordWrapEnabled == true)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    LocalContentColor.current,
-                            )
-                        },
-                        trailingIcon = {
-                            if (readyState?.wordWrapEnabled == true)
-                                Icon(Icons.Default.Check, null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp))
-                        },
-                        onClick = { overflowExpanded = false; onWordWrapToggle() },
-                    )
-                    // HTML preview (only shown for .html / .htm)
-                    if (showPreview) {
-                        DropdownMenuItem(
-                            text = { Text(if (isPreviewVisible) "Hide preview" else "Show preview") },
-                            leadingIcon = {
-                                Icon(
-                                    if (isPreviewVisible) Icons.Default.VisibilityOff
-                                    else Icons.Default.Visibility, null
-                                )
-                            },
-                            onClick = { overflowExpanded = false; onPreviewToggle() },
-                        )
+                        }
                     }
-                    HorizontalDivider()
-                    // Show history sheet (only if enabled in settings)
-                    DropdownMenuItem(
-                        text = { Text("View history") },
-                        leadingIcon = { Icon(Icons.Default.Restore, null) },
-                        enabled = readyState?.isVersionHistoryEnabled == true,
-                        onClick = { overflowExpanded = false; onShowHistory() },
-                    )
-                    HorizontalDivider()
-                    // Open file
-                    DropdownMenuItem(
-                        text = { Text("Open file") },
-                        leadingIcon = { Icon(Icons.Default.FolderOpen, null) },
-                        onClick = { overflowExpanded = false; onOpenFile() },
-                    )
                 }
-            }
-        },
-        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            titleContentColor = MaterialTheme.colorScheme.onSurface,
-            actionIconContentColor = MaterialTheme.colorScheme.onSurface,
-        ),
-    )
+            },
+            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
+                actionIconContentColor = MaterialTheme.colorScheme.onSurface,
+            ),
+        )
+
+        // Custom Tab chip row situated directly below the top app bar
+        if (files.isNotEmpty()) {
+            TabBar(
+                files = files,
+                selectedIndex = selectedIndex,
+                onTabSelected = onTabSelected,
+                onTabClosed = onTabClosed,
+            )
+        }
+    }
 }
 
 // Main Editor Content
@@ -322,13 +388,6 @@ fun EditorContent(
     isPreviewVisible: Boolean,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        TabBar(
-            files = state.openFiles,
-            selectedIndex = state.selectedFileIndex,
-            onTabSelected = onTabSelected,
-            onTabClosed = onTabClosed,
-        )
-
         AnimatedVisibility(
             visible = state.isSearchVisible,
             enter = expandVertically(),
@@ -353,13 +412,19 @@ fun EditorContent(
         if (currentFile.fileType == ".html" && isPreviewVisible) {
             PreviewPlaceholder(content = currentFile.content)
         } else {
-            SoraCodeEditor(
-                file = currentFile,
-                viewModel = viewModel,
-                wordWrap = state.wordWrapEnabled,
-                searchQuery = state.searchQuery,
-                isSearchVisible = state.isSearchVisible,
-            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                SoraCodeEditor(
+                    file = currentFile,
+                    viewModel = viewModel,
+                    wordWrap = state.wordWrapEnabled,
+                    searchQuery = state.searchQuery,
+                    isSearchVisible = state.isSearchVisible,
+                )
+            }
         }
     }
 }
@@ -384,7 +449,9 @@ fun SoraCodeEditor(
 
     val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val density = LocalDensity.current
-    val navBarPaddingPx = with(density) { navBarPadding.roundToPx() }
+    // Add extra padding so keyboard or bottom options island doesn't block text
+    val extraBottomPadding = navBarPadding + 76.dp
+    val extraBottomPaddingPx = with(density) { extraBottomPadding.roundToPx() }
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
@@ -408,7 +475,7 @@ fun SoraCodeEditor(
                     matchColor      = matchColor,
                 )
 
-                setPadding(paddingLeft, paddingTop, paddingRight, navBarPaddingPx)
+                setPadding(paddingLeft, paddingTop, paddingRight, extraBottomPaddingPx)
 
                 subscribeEvent<ContentChangeEvent> { _, _ ->
                     viewModel.onContentChanged()
@@ -430,7 +497,7 @@ fun SoraCodeEditor(
                 matchColor      = matchColor,
             )
 
-            editor.setPadding(editor.paddingLeft, editor.paddingTop, editor.paddingRight, navBarPaddingPx)
+            editor.setPadding(editor.paddingLeft, editor.paddingTop, editor.paddingRight, extraBottomPaddingPx)
 
             if (isSearchVisible && searchQuery.isNotBlank()) {
                 editor.searcher.search(searchQuery, EditorSearcher.SearchOptions(false, false))
@@ -560,33 +627,51 @@ fun TabBar(
     if (files.isEmpty()) return
     ScrollableTabRow(
         selectedTabIndex = selectedIndex,
-        edgePadding = 0.dp,
-        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        edgePadding = 16.dp,
+        containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.primary,
+        divider = {}, // Floating tabs without bottom line
+        indicator = {} // Indicator is handled by selecting background
     ) {
         files.forEachIndexed { index, file ->
+            val isSelected = selectedIndex == index
             Tab(
-                selected = selectedIndex == index,
+                selected = isSelected,
                 onClick = { onTabSelected(index) },
+                modifier = Modifier
+                    .padding(horizontal = 4.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (isSelected) MaterialTheme.colorScheme.secondaryContainer
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ),
                 text = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
                         Text(
                             text = file.name.formatAsFileName() + if (file.isModified) " •" else "",
                             maxLines = 1,
                             fontFamily = FontFamily.Monospace,
                             fontSize = 12.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.width(6.dp))
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Close tab",
                             modifier = Modifier
-                                .size(14.dp)
+                                .size(16.dp)
+                                .clip(RoundedCornerShape(4.dp))
                                 .clickable { onTabClosed(index) },
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
+                                   else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         )
                     }
-                },
+                }
             )
         }
     }
