@@ -7,6 +7,10 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -15,27 +19,27 @@ import java.io.InputStream
 
 /**
  * A custom [WebViewAssetLoader.PathHandler] that resolves relative asset
- * paths against a parent SAF directory URI.
- *
- * When the preview HTML contains `<link rel="stylesheet" href="style.css">`,
- * the WebView requests `https://appassets.androidplatform.net/assets/style.css`.
- * This handler intercepts that, locates "style.css" inside [parentDirectoryUri],
- * and streams it back so the browser can render it.
+ * paths against a parent SAF directory URI, and serves the main HTML document
+ * from memory.
  */
 private class SafPathHandler(
     private val context: android.content.Context,
     private val parentDirectoryUri: Uri,
+    private val htmlContentProvider: () -> String,
+    private val mainHtmlFileName: String,
 ) : WebViewAssetLoader.PathHandler {
 
     override fun handle(path: String): WebResourceResponse? {
-        // `path` arrives as e.g. "/style.css" or "/js/app.js"
         val fileName = path.trimStart('/')
         if (fileName.isBlank()) return null
 
+        // Serve the main HTML content dynamically
+        if (fileName.equals(mainHtmlFileName, ignoreCase = true) || fileName.equals("index.html", ignoreCase = true)) {
+            val stream = htmlContentProvider().byteInputStream(Charsets.UTF_8)
+            return WebResourceResponse("text/html", "UTF-8", stream)
+        }
+
         return try {
-            // Build a child document URI inside the same directory as the HTML file.
-            // parentDirectoryUri is the document URI of the HTML file itself; we need
-            // its parent tree, so we use DocumentsContract to list/find siblings.
             val inputStream: InputStream? = resolveAsset(fileName)
             inputStream?.let {
                 WebResourceResponse(mimeForName(fileName), "UTF-8", it)
@@ -51,15 +55,10 @@ private class SafPathHandler(
      */
     private fun resolveAsset(fileName: String): InputStream? {
         return try {
-            // Derive the parent tree URI from the HTML document URI
             val docId = android.provider.DocumentsContract.getDocumentId(parentDirectoryUri)
             val treeUri = android.provider.DocumentsContract.buildTreeDocumentUri(
                 parentDirectoryUri.authority,
                 docId
-            )
-            val parentDoc = android.provider.DocumentsContract.buildDocumentUriUsingTree(
-                treeUri,
-                android.provider.DocumentsContract.getTreeDocumentId(treeUri)
             )
             val childUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(
                 treeUri,
@@ -80,6 +79,7 @@ private class SafPathHandler(
     }
 
     private fun mimeForName(name: String): String = when {
+        name.endsWith(".html") || name.endsWith(".htm") -> "text/html"
         name.endsWith(".css")  -> "text/css"
         name.endsWith(".js")   -> "application/javascript"
         name.endsWith(".png")  -> "image/png"
@@ -92,15 +92,8 @@ private class SafPathHandler(
 
 /**
  * A Compose wrapper around [WebView] that:
- * 1. Enables JavaScript.
- * 2. Uses [WebViewAssetLoader] so local CSS/JS referenced in the HTML
- *    can be loaded via `https://appassets.androidplatform.net/assets/<filename>`.
- * 3. The HTML is loaded with its SAF URI as the base URL so relative hrefs
- *    are intercepted by the asset loader.
- *
- * @param htmlContent   Raw HTML string to render.
- * @param fileUri       SAF URI of the HTML file (used to resolve siblings).
- * @param modifier      Compose modifier.
+ * 1. Enables JavaScript and DOM storage.
+ * 2. Serves files using [WebViewAssetLoader] on `https://appassets.androidplatform.net/assets/<filename>`.
  */
 @Composable
 fun HtmlPreviewWebView(
@@ -110,15 +103,20 @@ fun HtmlPreviewWebView(
 ) {
     val context = LocalContext.current
 
+    // Keep the HTML content state updated for the lambda provider to read
+    var currentHtmlContent by remember { mutableStateOf(htmlContent) }
+    currentHtmlContent = htmlContent
+
     AndroidView(
         factory = { ctx ->
             val parsedUri = Uri.parse(fileUri)
+            val fileName = parsedUri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':') ?: "index.html"
 
             val assetLoader = WebViewAssetLoader.Builder()
                 .setDomain("appassets.androidplatform.net")
                 .addPathHandler(
                     "/assets/",
-                    SafPathHandler(ctx, parsedUri)
+                    SafPathHandler(ctx, parsedUri, { currentHtmlContent }, fileName)
                 )
                 .build()
 
@@ -132,19 +130,20 @@ fun HtmlPreviewWebView(
                     }
                 }
                 settings.javaScriptEnabled = true
-                settings.allowFileAccess = false          // not needed with asset loader
-                settings.allowContentAccess = false       // not needed with asset loader
+                settings.domStorageEnabled = true
+                settings.databaseEnabled = true
+                settings.allowFileAccess = true
+                settings.allowContentAccess = true
             }
         },
         update = { webView ->
-            // Use the asset loader base URL so relative hrefs get intercepted.
-            // If no fileUri, fall back to plain data load.
-            val baseUrl = if (fileUri.isNotBlank()) {
-                "https://appassets.androidplatform.net/assets/"
-            } else {
-                null
+            val parsedUri = Uri.parse(fileUri)
+            val fileName = parsedUri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':') ?: "index.html"
+            val url = "https://appassets.androidplatform.net/assets/$fileName"
+            
+            if (webView.url != url) {
+                webView.loadUrl(url)
             }
-            webView.loadDataWithBaseURL(baseUrl, htmlContent, "text/html", "UTF-8", null)
         },
         modifier = modifier.fillMaxSize()
     )

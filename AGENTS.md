@@ -38,7 +38,7 @@ You must actively maintain the project's changelog. After every completed task, 
 - Do NOT read or rewrite the whole file every time. Simply append the new data at the very end of the document.
 - Include a Date and Time stamp for the update.
   Whenever a fix, optimization, or feature is completed, you MUST document it using the following format:
-
+- **Date:** current date and time in [MM-DD-YYYY HH:MM] format
 - **Issue:** (Briefly describe the exact issue or bottleneck that was just solved)
 - **Type:** (Specify the category: e.g., Error, Bug, UI, Performance, Architecture, EditorEngine, Feature)
 - **Solution:** (Explain how the issue was solved. Maximum 10 lines.)

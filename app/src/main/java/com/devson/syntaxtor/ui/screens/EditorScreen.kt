@@ -565,14 +565,16 @@ fun EditorContent(
                 .imePadding()
                 .bringIntoViewRequester(bringIntoViewRequester)
         ) {
-            SoraCodeEditor(
-                file = currentFile,
-                viewModel = viewModel,
-                wordWrap = state.wordWrapEnabled,
-                searchQuery = state.searchQuery,
-                isSearchVisible = state.isSearchVisible,
-                bringIntoViewRequester = bringIntoViewRequester,
-            )
+            key(currentFile.uri) {
+                SoraCodeEditor(
+                    file = currentFile,
+                    viewModel = viewModel,
+                    wordWrap = state.wordWrapEnabled,
+                    searchQuery = state.searchQuery,
+                    isSearchVisible = state.isSearchVisible,
+                    bringIntoViewRequester = bringIntoViewRequester,
+                )
+            }
         }
     }
 }
