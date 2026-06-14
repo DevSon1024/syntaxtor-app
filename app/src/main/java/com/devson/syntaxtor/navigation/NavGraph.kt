@@ -4,10 +4,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navArgument
 import com.devson.syntaxtor.ui.screens.EditorScreen
 import com.devson.syntaxtor.ui.screens.HomeScreen
+import com.devson.syntaxtor.ui.screens.HtmlPreviewScreen
 import com.devson.syntaxtor.ui.screens.SettingsScreen
 import com.devson.syntaxtor.viewmodel.EditorViewModel
 import com.devson.syntaxtor.viewmodel.HomeViewModel
@@ -23,12 +26,19 @@ fun NavGraph(
     onOpenFileSelection: () -> Unit,
     startDestination: String = Screen.Home.route,
 ) {
-    // Collect global editor navigation events (e.g. file successfully opened)
+    // Collect global editor navigation events
     LaunchedEffect(editorViewModel) {
         editorViewModel.navigationEvent.collect { event ->
-            if (event is EditorViewModel.NavigationEvent.NavigateToEditor) {
-                navController.navigate(Screen.Editor.route) {
-                    launchSingleTop = true
+            when (event) {
+                is EditorViewModel.NavigationEvent.NavigateToEditor -> {
+                    navController.navigate(Screen.Editor.route) {
+                        launchSingleTop = true
+                    }
+                }
+                is EditorViewModel.NavigationEvent.NavigateToPreview -> {
+                    navController.navigate(Screen.Preview.createRoute(event.fileUri)) {
+                        launchSingleTop = true
+                    }
                 }
             }
         }
@@ -60,6 +70,23 @@ fun NavGraph(
             SettingsScreen(
                 navController = navController,
                 viewModel = settingsViewModel
+            )
+        }
+
+        composable(
+            route = Screen.Preview.route,
+            arguments = listOf(
+                navArgument("fileUri") {
+                    type = NavType.StringType
+                }
+            )
+        ) { backStackEntry ->
+            val encodedUri = backStackEntry.arguments?.getString("fileUri") ?: ""
+            val fileUri = java.net.URLDecoder.decode(encodedUri, "UTF-8")
+            HtmlPreviewScreen(
+                navController = navController,
+                viewModel = editorViewModel,
+                fileUri = fileUri
             )
         }
     }

@@ -15,6 +15,9 @@ class SettingsRepository(context: Context) {
     private val _versionHistoryEnabled = MutableStateFlow(getVersionHistoryPreference())
     val versionHistoryEnabled: StateFlow<Boolean> = _versionHistoryEnabled.asStateFlow()
 
+    private val _overlayDuration = MutableStateFlow(getOverlayDurationPreference())
+    val overlayDuration: StateFlow<Float> = _overlayDuration.asStateFlow()
+
     fun getThemePreference(): String {
         return prefs.getString("key_theme", "SYSTEM") ?: "SYSTEM"
     }
@@ -31,5 +34,14 @@ class SettingsRepository(context: Context) {
     fun setVersionHistoryPreference(enabled: Boolean) {
         prefs.edit().putBoolean("key_version_history", enabled).apply()
         _versionHistoryEnabled.value = enabled
+    }
+
+    fun getOverlayDurationPreference(): Float {
+        return prefs.getFloat("key_overlay_duration", 1.0f)
+    }
+
+    fun setOverlayDurationPreference(duration: Float) {
+        prefs.edit().putFloat("key_overlay_duration", duration).apply()
+        _overlayDuration.value = duration
     }
 }

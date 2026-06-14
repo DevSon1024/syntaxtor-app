@@ -9,6 +9,7 @@ This document serves as the absolute source of truth for any AI agent or LLM ass
 - **Zero Crash Tolerance:** Improve code robustness to ensure the app does not crash under any circumstances. Always prioritize graceful degradation (e.g., showing a read-only mode or safe error states) over throwing unhandled exceptions when parsing unknown files.
 - **No Hallucinations:** Only use existing APIs, classes, and resources within the project. Do not invent external diffing libraries unless explicitly approved. If you are unsure about an existing implementation, ask the developer to fetch the file contents.
 - **One Line Explanation:** Do not explain things in long phrases and paragraphs. Be short and precise. Do not explain things if it is not required.
+- **No Excessive Comments in Code Files**
 
 ## 2. UI / Jetpack Compose Guidelines
 

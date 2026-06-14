@@ -47,6 +47,9 @@ sealed class EditorUiState {
         val isSaving: Boolean = false,
         // File currently pending close confirmation dialog
         val filePendingClose: EditorFile? = null,
+        // Split-pane mode (landscape): which file index goes in each pane
+        val splitLeftIndex: Int = 0,
+        val splitRightIndex: Int = 1,
     ) : EditorUiState()
 }
 
@@ -72,9 +75,12 @@ class EditorViewModel(
     private val _snackbarMessage = MutableSharedFlow<String>()
     val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
 
+    val overlayDuration: StateFlow<Float> = settingsRepository.overlayDuration
+
     // Navigation events
     sealed interface NavigationEvent {
         object NavigateToEditor : NavigationEvent
+        data class NavigateToPreview(val fileUri: String) : NavigationEvent
     }
 
     private val _navigationEvent = MutableSharedFlow<NavigationEvent>()
@@ -95,24 +101,69 @@ class EditorViewModel(
         }
     }
 
+    // Get live content for file rendering (preview)
+    fun getLiveContent(uri: String): String {
+        val state = _uiState.value as? EditorUiState.Ready ?: return ""
+        val index = state.openFiles.indexOfFirst { it.uri.toString() == uri }
+        if (index < 0) return ""
+        val file = state.openFiles[index]
+        return if (index == state.selectedFileIndex) {
+            currentEditor()?.text?.toString() ?: file.content
+        } else {
+            file.content
+        }
+    }
+
+    fun triggerHtmlPreview(uriString: String) {
+        val state = _uiState.value as? EditorUiState.Ready ?: return
+        val index = state.openFiles.indexOfFirst { it.uri.toString() == uriString }
+        if (index >= 0) {
+            val file = state.openFiles[index]
+            val liveContent = if (index == state.selectedFileIndex) {
+                currentEditor()?.text?.toString() ?: file.content
+            } else {
+                file.content
+            }
+            val updatedFile = file.copy(content = liveContent)
+            _uiState.update { s ->
+                if (s is EditorUiState.Ready) {
+                    val newFiles = s.openFiles.toMutableList().apply {
+                        set(index, updatedFile)
+                    }
+                    s.copy(openFiles = newFiles)
+                } else {
+                    s
+                }
+            }
+        }
+        viewModelScope.launch {
+            _navigationEvent.emit(NavigationEvent.NavigateToPreview(uriString))
+        }
+    }
+
     //  File / Tab operations
 
     fun openFile(uri: Uri) {
         viewModelScope.launch {
+            // Snapshot existing state BEFORE emitting Loading so we don't lose open tabs
+            val prevState = _uiState.value as? EditorUiState.Ready
+            val currentFiles = prevState?.openFiles ?: emptyList()
+            val isWordWrap = prevState?.wordWrapEnabled ?: false
+
             _uiState.value = EditorUiState.Loading
             openFileUseCase(uri)
                 .onSuccess { file ->
-                    val currentState = _uiState.value
-                    val currentFiles = (currentState as? EditorUiState.Ready)?.openFiles ?: emptyList()
-                    val isWordWrap = (currentState as? EditorUiState.Ready)?.wordWrapEnabled ?: false
                     val histEnabled = settingsRepository.getVersionHistoryPreference()
 
                     // Avoid duplicate tabs
                     val alreadyOpen = currentFiles.indexOfFirst { it.uri == file.uri }
                     if (alreadyOpen >= 0) {
-                        _uiState.update {
-                            (it as EditorUiState.Ready).copy(selectedFileIndex = alreadyOpen)
-                        }
+                        // Restore from the snapshot captured before Loading was emitted.
+                        // At this point _uiState is Loading, so casting it to Ready crashes -
+                        // use prevState directly instead.
+                        _uiState.value = (prevState ?: EditorUiState.Ready()).copy(
+                            selectedFileIndex = alreadyOpen
+                        )
                         startObservingHistory(file.uri.toString())
                         addRecentFileUseCase(file.uri.toString(), file.name, file.fileType)
                         _navigationEvent.emit(NavigationEvent.NavigateToEditor)
@@ -121,11 +172,17 @@ class EditorViewModel(
                     }
 
                     val newFiles = currentFiles + file
+                    // Preserve existing split assignments; right pane defaults to the new file
+                    val newSplitLeft = (prevState?.splitLeftIndex ?: 0)
+                        .coerceIn(0, newFiles.lastIndex)
+                    val newSplitRight = newFiles.lastIndex // newest file lands in right pane
                     _uiState.value = EditorUiState.Ready(
                         openFiles = newFiles,
                         selectedFileIndex = newFiles.lastIndex,
                         wordWrapEnabled = isWordWrap,
                         isVersionHistoryEnabled = histEnabled,
+                        splitLeftIndex = newSplitLeft,
+                        splitRightIndex = newSplitRight,
                     )
                     startObservingHistory(file.uri.toString())
                     addRecentFileUseCase(file.uri.toString(), file.name, file.fileType)
@@ -155,6 +212,22 @@ class EditorViewModel(
         }
     }
 
+    fun setSplitLeft(index: Int) {
+        (_uiState.value as? EditorUiState.Ready)?.let { state ->
+            if (index !in state.openFiles.indices) return
+            _uiState.update { state.copy(splitLeftIndex = index, selectedFileIndex = index) }
+            startObservingHistory(state.openFiles[index].uri.toString())
+        }
+    }
+
+    fun setSplitRight(index: Int) {
+        (_uiState.value as? EditorUiState.Ready)?.let { state ->
+            if (index !in state.openFiles.indices) return
+            _uiState.update { state.copy(splitRightIndex = index, selectedFileIndex = index) }
+            startObservingHistory(state.openFiles[index].uri.toString())
+        }
+    }
+
     fun closeTab(index: Int) {
         val state = _uiState.value as? EditorUiState.Ready ?: return
         if (index !in state.openFiles.indices) return
@@ -171,16 +244,26 @@ class EditorViewModel(
             _uiState.value = EditorUiState.Idle
             return
         }
-        val newIndex = when {
-            index < state.selectedFileIndex -> state.selectedFileIndex - 1
-            index == state.selectedFileIndex -> (index - 1).coerceAtLeast(0)
-            else -> state.selectedFileIndex
+
+        fun remapIndex(old: Int): Int = when {
+            index < old  -> old - 1
+            index == old -> (old - 1).coerceAtLeast(0)
+            else         -> old
         }.coerceIn(0, newFiles.lastIndex)
 
+        val newSelected   = remapIndex(state.selectedFileIndex)
+        val newSplitLeft  = remapIndex(state.splitLeftIndex)
+        val newSplitRight = remapIndex(state.splitRightIndex)
+
         _uiState.update {
-            state.copy(openFiles = newFiles, selectedFileIndex = newIndex)
+            state.copy(
+                openFiles = newFiles,
+                selectedFileIndex = newSelected,
+                splitLeftIndex = newSplitLeft,
+                splitRightIndex = newSplitRight,
+            )
         }
-        startObservingHistory(newFiles[newIndex].uri.toString())
+        startObservingHistory(newFiles[newSelected].uri.toString())
     }
 
     fun closeFile(uri: String) {

@@ -17,6 +17,7 @@ class SettingsViewModel(
 
     val theme: StateFlow<String> = settingsRepository.theme
     val versionHistoryEnabled: StateFlow<Boolean> = settingsRepository.versionHistoryEnabled
+    val overlayDuration: StateFlow<Float> = settingsRepository.overlayDuration
 
     private val _snackbarMessage = MutableSharedFlow<String>()
     val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
@@ -27,6 +28,10 @@ class SettingsViewModel(
 
     fun setVersionHistoryEnabled(enabled: Boolean) {
         settingsRepository.setVersionHistoryPreference(enabled)
+    }
+
+    fun setOverlayDuration(duration: Float) {
+        settingsRepository.setOverlayDurationPreference(duration)
     }
 
     fun clearVersionHistory() {

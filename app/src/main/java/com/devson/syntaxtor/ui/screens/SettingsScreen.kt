@@ -30,6 +30,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -56,6 +57,7 @@ fun SettingsScreen(
 ) {
     val themeMode by viewModel.theme.collectAsState()
     val historyEnabled by viewModel.versionHistoryEnabled.collectAsState()
+    val overlayDuration by viewModel.overlayDuration.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showThemeDialog by remember { mutableStateOf(false) }
@@ -128,6 +130,43 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            // Editor Navigation settings header
+            Text(
+                text = "Editor Navigation",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
+            )
+
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Tab Overlay Duration",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        text = "Duration: ${"%.1f".format(overlayDuration)}s",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Slider(
+                        value = overlayDuration,
+                        onValueChange = { viewModel.setOverlayDuration(it) },
+                        valueRange = 1.0f..15.0f,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
             // Editor History settings header
             Text(
                 text = "Version History",
@@ -177,6 +216,7 @@ fun SettingsScreen(
                     )
                 }
             }
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 

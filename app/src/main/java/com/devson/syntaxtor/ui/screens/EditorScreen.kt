@@ -1,5 +1,6 @@
 package com.devson.syntaxtor.ui.screens
 
+import android.content.res.Configuration
 import android.graphics.Typeface
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -29,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -36,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -43,7 +46,6 @@ import androidx.navigation.NavController
 import com.devson.syntaxtor.domain.model.EditorFile
 import com.devson.syntaxtor.navigation.Screen
 import com.devson.syntaxtor.ui.components.HistoryBottomSheet
-import com.devson.syntaxtor.ui.preview.PreviewPlaceholder
 import com.devson.syntaxtor.ui.utils.formatAsFileName
 import com.devson.syntaxtor.viewmodel.EditorUiState
 import com.devson.syntaxtor.viewmodel.EditorViewModel
@@ -81,6 +83,17 @@ fun EditorScreen(
     //  BackHandler
     BackHandler(enabled = true) {
         handleBack()
+    }
+
+    // Tab Full Name Overlay State
+    var overlayText by remember { mutableStateOf<String?>(null) }
+    val overlayDuration by viewModel.overlayDuration.collectAsState()
+
+    LaunchedEffect(overlayText) {
+        if (overlayText != null) {
+            kotlinx.coroutines.delay((overlayDuration * 1000).toLong())
+            overlayText = null
+        }
     }
 
     // Collect global snackbar messages
@@ -148,11 +161,18 @@ fun EditorScreen(
                 onSave = { viewModel.saveCurrentFile() },
                 onOpenFile = onOpenFileSelection,
                 isPreviewVisible = isPreviewVisible,
-                onPreviewToggle = { isPreviewVisible = !isPreviewVisible },
+                onPreviewToggle = {
+                    currentFile?.let { viewModel.triggerHtmlPreview(it.uri.toString()) }
+                },
                 onUndo = { viewModel.undo() },
                 onRedo = { viewModel.redo() },
                 onBackClick = handleBack,
-                onTabSelected = { viewModel.selectTab(it) },
+                onTabSelected = { index ->
+                    viewModel.selectTab(index)
+                    readyState?.openFiles?.getOrNull(index)?.let { file ->
+                        overlayText = file.name
+                    }
+                },
                 onTabClosed = { index ->
                     readyState?.openFiles?.getOrNull(index)?.let { file ->
                         viewModel.requestCloseFile(file.uri.toString())
@@ -168,6 +188,7 @@ fun EditorScreen(
                 .fillMaxSize()
                 .padding(top = paddingValues.calculateTopPadding())
         ) {
+            val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
             when (val state = uiState) {
                 is EditorUiState.Idle -> CenterText("No file opened.\nTap Open File button to begin.")
                 is EditorUiState.Loading -> CircularProgressIndicator(
@@ -177,11 +198,24 @@ fun EditorScreen(
                 is EditorUiState.Ready -> {
                     if (state.openFiles.isEmpty()) {
                         CenterText("No file opened.")
+                    } else if (isLandscape && state.openFiles.size >= 2) {
+                        SplitPaneContent(
+                            state = state,
+                            viewModel = viewModel,
+                            onSearchQueryChange = { viewModel.updateSearchQuery(it) },
+                            onNextMatch = { viewModel.nextSearchMatch() },
+                            onPrevMatch = { viewModel.previousSearchMatch() },
+                        )
                     } else {
                         EditorContent(
                             state = state,
                             viewModel = viewModel,
-                            onTabSelected = { viewModel.selectTab(it) },
+                            onTabSelected = { index ->
+                                viewModel.selectTab(index)
+                                state.openFiles.getOrNull(index)?.let { file ->
+                                    overlayText = file.name
+                                }
+                            },
                             onTabClosed = { index ->
                                 state.openFiles.getOrNull(index)?.let { file ->
                                     viewModel.requestCloseFile(file.uri.toString())
@@ -190,9 +224,36 @@ fun EditorScreen(
                             onSearchQueryChange = { viewModel.updateSearchQuery(it) },
                             onNextMatch = { viewModel.nextSearchMatch() },
                             onPrevMatch = { viewModel.previousSearchMatch() },
-                            isPreviewVisible = isPreviewVisible,
                         )
                     }
+                }
+            }
+
+            // Tab Full Name Overlay
+            AnimatedVisibility(
+                visible = overlayText != null,
+                enter = fadeIn() + slideInVertically { -it },
+                exit = fadeOut() + slideOutVertically { -it },
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 16.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    tonalElevation = 6.dp,
+                    modifier = Modifier.padding(horizontal = 24.dp)
+                ) {
+                    Text(
+                        text = overlayText ?: "",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
 
@@ -342,12 +403,9 @@ fun EditorTopBar(
                             onDismissRequest = { overflowExpanded = false },
                         ) {
                             DropdownMenuItem(
-                                text = { Text(if (isPreviewVisible) "Hide preview" else "Show preview") },
+                                text = { Text("Show preview") },
                                 leadingIcon = {
-                                    Icon(
-                                        if (isPreviewVisible) Icons.Default.VisibilityOff
-                                        else Icons.Default.Visibility, null
-                                    )
+                                    Icon(Icons.Default.Visibility, null)
                                 },
                                 onClick = { overflowExpanded = false; onPreviewToggle() },
                             )
@@ -385,7 +443,6 @@ fun EditorContent(
     onSearchQueryChange: (String) -> Unit,
     onNextMatch: () -> Unit,
     onPrevMatch: () -> Unit,
-    isPreviewVisible: Boolean,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         AnimatedVisibility(
@@ -409,22 +466,18 @@ fun EditorContent(
             return@Column
         }
 
-        if (currentFile.fileType == ".html" && isPreviewVisible) {
-            PreviewPlaceholder(content = currentFile.content)
-        } else {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-            ) {
-                SoraCodeEditor(
-                    file = currentFile,
-                    viewModel = viewModel,
-                    wordWrap = state.wordWrapEnabled,
-                    searchQuery = state.searchQuery,
-                    isSearchVisible = state.isSearchVisible,
-                )
-            }
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            SoraCodeEditor(
+                file = currentFile,
+                viewModel = viewModel,
+                wordWrap = state.wordWrapEnabled,
+                searchQuery = state.searchQuery,
+                isSearchVisible = state.isSearchVisible,
+            )
         }
     }
 }
@@ -512,9 +565,7 @@ fun SoraCodeEditor(
     }
 }
 
-// ============================================================================
 // Color scheme helper - maps Material3 tokens → Sora's EditorColorScheme
-// ============================================================================
 
 private fun CodeEditor.applyColorScheme(
     backgroundColor: Int,
@@ -538,9 +589,7 @@ private fun CodeEditor.applyColorScheme(
     invalidate()
 }
 
-// ============================================================================
 // Search Bar
-// ============================================================================
 
 @Composable
 fun SearchBar(
@@ -688,5 +737,191 @@ fun CenterText(text: String) {
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.bodyMedium,
         )
+    }
+}
+
+//  Split-Pane (Landscape) 
+
+/**
+ * Renders two side-by-side editor panes when the device is in landscape and
+ * at least two files are open.  Each pane has:
+ *  - A [PaneSelectorChip] to pick which open file to display.
+ *  - An independent [SoraCodeEditor] for that file.
+ * Tapping a pane selector makes that file the "active" one for save/undo.
+ */
+@Composable
+fun SplitPaneContent(
+    state: EditorUiState.Ready,
+    viewModel: EditorViewModel,
+    onSearchQueryChange: (String) -> Unit,
+    onNextMatch: () -> Unit,
+    onPrevMatch: () -> Unit,
+) {
+    val leftFile  = state.openFiles.getOrNull(state.splitLeftIndex)  ?: state.openFiles.first()
+    val rightFile = state.openFiles.getOrNull(state.splitRightIndex) ?: state.openFiles.getOrNull(1) ?: leftFile
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Search bar shared across both panes
+        AnimatedVisibility(
+            visible = state.isSearchVisible,
+            enter = expandVertically(),
+            exit = shrinkVertically(),
+        ) {
+            SearchBar(
+                query = state.searchQuery,
+                matchCount = state.searchMatchCount,
+                currentMatchIndex = state.searchMatchIndex,
+                onQueryChange = onSearchQueryChange,
+                onNext = onNextMatch,
+                onPrev = onPrevMatch,
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            //  Left pane 
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            ) {
+                PaneSelectorChip(
+                    files = state.openFiles,
+                    selectedIndex = state.splitLeftIndex,
+                    isActive = state.selectedFileIndex == state.splitLeftIndex,
+                    onSelect = { index -> viewModel.setSplitLeft(index) },
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    key(leftFile.uri) {
+                        SoraCodeEditor(
+                            file = leftFile,
+                            viewModel = viewModel,
+                            wordWrap = state.wordWrapEnabled,
+                            searchQuery = state.searchQuery,
+                            isSearchVisible = state.isSearchVisible,
+                        )
+                    }
+                }
+            }
+
+            //  Divider 
+            VerticalDivider(
+                modifier = Modifier.fillMaxHeight(),
+                thickness = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+            )
+
+            //  Right pane 
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            ) {
+                PaneSelectorChip(
+                    files = state.openFiles,
+                    selectedIndex = state.splitRightIndex,
+                    isActive = state.selectedFileIndex == state.splitRightIndex,
+                    onSelect = { index -> viewModel.setSplitRight(index) },
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    key(rightFile.uri) {
+                        SoraCodeEditor(
+                            file = rightFile,
+                            viewModel = viewModel,
+                            wordWrap = state.wordWrapEnabled,
+                            searchQuery = state.searchQuery,
+                            isSearchVisible = state.isSearchVisible,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PaneSelectorChip(
+    files: List<EditorFile>,
+    selectedIndex: Int,
+    isActive: Boolean,
+    onSelect: (Int) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val file = files.getOrNull(selectedIndex)
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Surface(
+            onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth(),
+            color = if (isActive) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceVariant,
+            tonalElevation = if (isActive) 4.dp else 1.dp,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = file?.name?.formatAsFileName()?.let {
+                        it + if (file.isModified) " •" else ""
+                    } ?: "—",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                    ),
+                    color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    imageVector = Icons.Default.UnfoldMore,
+                    contentDescription = "Switch file in pane",
+                    modifier = Modifier.size(16.dp),
+                    tint = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer
+                           else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            files.forEachIndexed { index, f ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = f.name.formatAsFileName() + if (f.isModified) " •" else "",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                        )
+                    },
+                    leadingIcon = if (index == selectedIndex) {
+                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                    } else null,
+                    onClick = {
+                        onSelect(index)
+                        expanded = false
+                    },
+                )
+            }
+        }
     }
 }
