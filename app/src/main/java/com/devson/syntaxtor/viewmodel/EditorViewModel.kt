@@ -76,6 +76,7 @@ class EditorViewModel(
     val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
 
     val overlayDuration: StateFlow<Float> = settingsRepository.overlayDuration
+    val hideSystemBarsInLandscape: StateFlow<Boolean> = settingsRepository.hideSystemBarsInLandscape
 
     // Navigation events
     sealed interface NavigationEvent {

@@ -18,6 +18,9 @@ class SettingsRepository(context: Context) {
     private val _overlayDuration = MutableStateFlow(getOverlayDurationPreference())
     val overlayDuration: StateFlow<Float> = _overlayDuration.asStateFlow()
 
+    private val _hideSystemBarsInLandscape = MutableStateFlow(getHideSystemBarsInLandscapePreference())
+    val hideSystemBarsInLandscape: StateFlow<Boolean> = _hideSystemBarsInLandscape.asStateFlow()
+
     fun getThemePreference(): String {
         return prefs.getString("key_theme", "SYSTEM") ?: "SYSTEM"
     }
@@ -43,5 +46,14 @@ class SettingsRepository(context: Context) {
     fun setOverlayDurationPreference(duration: Float) {
         prefs.edit().putFloat("key_overlay_duration", duration).apply()
         _overlayDuration.value = duration
+    }
+
+    fun getHideSystemBarsInLandscapePreference(): Boolean {
+        return prefs.getBoolean("key_hide_system_bars_landscape", true)
+    }
+
+    fun setHideSystemBarsInLandscapePreference(hide: Boolean) {
+        prefs.edit().putBoolean("key_hide_system_bars_landscape", hide).apply()
+        _hideSystemBarsInLandscape.value = hide
     }
 }

@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Palette
@@ -58,6 +59,7 @@ fun SettingsScreen(
     val themeMode by viewModel.theme.collectAsState()
     val historyEnabled by viewModel.versionHistoryEnabled.collectAsState()
     val overlayDuration by viewModel.overlayDuration.collectAsState()
+    val hideSystemBarsInLandscape by viewModel.hideSystemBarsInLandscape.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showThemeDialog by remember { mutableStateOf(false) }
@@ -125,6 +127,38 @@ fun SettingsScreen(
                         Icon(Icons.Default.Palette, contentDescription = null)
                     },
                     modifier = Modifier.clickable { showThemeDialog = true }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Immersive Mode settings header
+            Text(
+                text = "Immersive Mode",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
+            )
+
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                ListItem(
+                    headlineContent = { Text("Immersive Landscape Mode") },
+                    supportingContent = { Text("Hide status and navigation bars dynamically in landscape mode.") },
+                    leadingContent = {
+                        Icon(Icons.Default.Fullscreen, contentDescription = null)
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = hideSystemBarsInLandscape,
+                            onCheckedChange = { viewModel.setHideSystemBarsInLandscape(it) }
+                        )
+                    }
                 )
             }
 

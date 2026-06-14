@@ -18,6 +18,7 @@ class SettingsViewModel(
     val theme: StateFlow<String> = settingsRepository.theme
     val versionHistoryEnabled: StateFlow<Boolean> = settingsRepository.versionHistoryEnabled
     val overlayDuration: StateFlow<Float> = settingsRepository.overlayDuration
+    val hideSystemBarsInLandscape: StateFlow<Boolean> = settingsRepository.hideSystemBarsInLandscape
 
     private val _snackbarMessage = MutableSharedFlow<String>()
     val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
@@ -32,6 +33,10 @@ class SettingsViewModel(
 
     fun setOverlayDuration(duration: Float) {
         settingsRepository.setOverlayDurationPreference(duration)
+    }
+
+    fun setHideSystemBarsInLandscape(hide: Boolean) {
+        settingsRepository.setHideSystemBarsInLandscapePreference(hide)
     }
 
     fun clearVersionHistory() {

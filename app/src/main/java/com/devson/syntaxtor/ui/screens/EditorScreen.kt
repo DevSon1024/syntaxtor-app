@@ -37,6 +37,11 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import android.app.Activity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -81,6 +86,29 @@ fun EditorScreen(
 
     LaunchedEffect(isImeVisible) {
         isIslandExpanded = !isImeVisible
+    }
+
+    // Dynamic Immersive landscape mode
+    val hideSystemBarsInLandscape by viewModel.hideSystemBarsInLandscape.collectAsState()
+    val orientation = LocalConfiguration.current.orientation
+    val view = LocalView.current
+
+    LaunchedEffect(orientation, hideSystemBarsInLandscape) {
+        val activity = view.context as? Activity ?: return@LaunchedEffect
+        val window = activity.window
+        val insetsController = WindowCompat.getInsetsController(window, view)
+        
+        // Ensure the app draws behind system bars smoothly
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        val isLandscape = orientation == Configuration.ORIENTATION_LANDSCAPE
+        if (isLandscape && hideSystemBarsInLandscape) {
+            insetsController.hide(WindowInsetsCompat.Type.systemBars())
+            insetsController.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            insetsController.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
 
     val readyState = uiState as? EditorUiState.Ready
@@ -483,7 +511,8 @@ fun EditorTopBar(
         )
 
         // Custom Tab chip row situated directly below the top app bar
-        if (files.isNotEmpty()) {
+        val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+        if (files.isNotEmpty() && !isLandscape) {
             TabBar(
                 files = files,
                 selectedIndex = selectedIndex,
