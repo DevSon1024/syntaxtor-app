@@ -3,16 +3,21 @@ package com.devson.syntaxtor.ui.screens
 import android.content.res.Configuration
 import android.graphics.Typeface
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -50,13 +55,16 @@ import com.devson.syntaxtor.ui.utils.formatAsFileName
 import com.devson.syntaxtor.viewmodel.EditorUiState
 import com.devson.syntaxtor.viewmodel.EditorViewModel
 import io.github.rosemoe.sora.event.ContentChangeEvent
+import io.github.rosemoe.sora.event.SelectionChangeEvent
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.EditorSearcher
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
 import io.github.rosemoe.sora.widget.subscribeEvent
+import kotlinx.coroutines.launch
 
 // Root Screen
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EditorScreen(
     navController: NavController,
@@ -66,6 +74,14 @@ fun EditorScreen(
     val uiState by viewModel.uiState.collectAsState()
     var isPreviewVisible by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Keyboard and bottom options island states
+    var isIslandExpanded by remember { mutableStateOf(true) }
+    val isImeVisible = WindowInsets.isImeVisible
+
+    LaunchedEffect(isImeVisible) {
+        isIslandExpanded = !isImeVisible
+    }
 
     val readyState = uiState as? EditorUiState.Ready
     val currentFile = readyState?.openFiles?.getOrNull(readyState.selectedFileIndex)
@@ -259,51 +275,97 @@ fun EditorScreen(
 
             // Bottom Options Island
             if (readyState != null && readyState.openFiles.isNotEmpty()) {
-                Surface(
+                Box(
                     modifier = Modifier
+                        .fillMaxWidth()
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = 16.dp)
                         .windowInsetsPadding(WindowInsets.ime)
                         .windowInsetsPadding(WindowInsets.navigationBars)
-                        .wrapContentSize(),
-                    shape = RoundedCornerShape(percent = 50),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    tonalElevation = 8.dp,
-                    shadowElevation = 6.dp
+                        .padding(bottom = 16.dp),
+                    contentAlignment = if (isIslandExpanded) Alignment.Center else Alignment.CenterEnd
                 ) {
-                    Row(
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                    ) {
-                        IconButton(onClick = onOpenFileSelection) {
-                            Icon(Icons.Default.FolderOpen, contentDescription = "Open File")
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        IconButton(onClick = { viewModel.toggleSearch() }) {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Find in File",
-                                tint = if (readyState.isSearchVisible) MaterialTheme.colorScheme.primary else LocalContentColor.current
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        IconButton(onClick = { viewModel.toggleWordWrap() }) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.WrapText,
-                                contentDescription = "Word Wrap",
-                                tint = if (readyState.wordWrapEnabled) MaterialTheme.colorScheme.primary else LocalContentColor.current
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        IconButton(
-                            onClick = { viewModel.toggleHistorySheet() },
-                            enabled = readyState.isVersionHistoryEnabled
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = "View History"
-                            )
+                    AnimatedContent(
+                        targetState = isIslandExpanded,
+                        transitionSpec = {
+                            fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
+                        },
+                        label = "BottomIslandTransition"
+                    ) { expanded ->
+                        if (expanded) {
+                            Surface(
+                                shape = RoundedCornerShape(percent = 50),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                tonalElevation = 8.dp,
+                                shadowElevation = 6.dp,
+                                modifier = Modifier.wrapContentSize()
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.SpaceEvenly,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                                ) {
+                                    IconButton(onClick = onOpenFileSelection) {
+                                        Icon(Icons.Default.FolderOpen, contentDescription = "Open File")
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    IconButton(onClick = { viewModel.toggleSearch() }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = "Find in File",
+                                            tint = if (readyState.isSearchVisible) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    IconButton(onClick = { viewModel.toggleWordWrap() }) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.WrapText,
+                                            contentDescription = "Word Wrap",
+                                            tint = if (readyState.wordWrapEnabled) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    IconButton(
+                                        onClick = { viewModel.toggleHistorySheet() },
+                                        enabled = readyState.isVersionHistoryEnabled
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.History,
+                                            contentDescription = "View History"
+                                        )
+                                    }
+                                    if (isImeVisible) {
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        IconButton(onClick = { isIslandExpanded = false }) {
+                                            Icon(
+                                                imageVector = Icons.Default.ChevronRight,
+                                                contentDescription = "Collapse Tools"
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Surface(
+                                onClick = { isIslandExpanded = true },
+                                shape = RoundedCornerShape(percent = 50),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                tonalElevation = 8.dp,
+                                shadowElevation = 6.dp,
+                                modifier = Modifier
+                                    .padding(end = 16.dp)
+                                    .size(48.dp)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ChevronLeft,
+                                        contentDescription = "Expand Tools",
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -466,10 +528,13 @@ fun EditorContent(
             return@Column
         }
 
+        val bringIntoViewRequester = remember { BringIntoViewRequester() }
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .imePadding()
+                .bringIntoViewRequester(bringIntoViewRequester)
         ) {
             SoraCodeEditor(
                 file = currentFile,
@@ -477,6 +542,7 @@ fun EditorContent(
                 wordWrap = state.wordWrapEnabled,
                 searchQuery = state.searchQuery,
                 isSearchVisible = state.isSearchVisible,
+                bringIntoViewRequester = bringIntoViewRequester,
             )
         }
     }
@@ -484,6 +550,7 @@ fun EditorContent(
 
 // Sora CodeEditor via AndroidView
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SoraCodeEditor(
     file: EditorFile,
@@ -491,6 +558,7 @@ fun SoraCodeEditor(
     wordWrap: Boolean,
     searchQuery: String,
     isSearchVisible: Boolean,
+    bringIntoViewRequester: BringIntoViewRequester? = null,
 ) {
     val backgroundColor = MaterialTheme.colorScheme.background.toArgb()
     val textColor       = MaterialTheme.colorScheme.onBackground.toArgb()
@@ -500,11 +568,13 @@ fun SoraCodeEditor(
     val selectionColor  = MaterialTheme.colorScheme.primaryContainer.toArgb()
     val matchColor      = MaterialTheme.colorScheme.tertiaryContainer.toArgb()
 
+    val isImeVisible = WindowInsets.isImeVisible
     val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val density = LocalDensity.current
     // Add extra padding so keyboard or bottom options island doesn't block text
-    val extraBottomPadding = navBarPadding + 76.dp
+    val extraBottomPadding = if (isImeVisible) 76.dp else (navBarPadding + 76.dp)
     val extraBottomPaddingPx = with(density) { extraBottomPadding.roundToPx() }
+    val coroutineScope = rememberCoroutineScope()
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
@@ -532,6 +602,29 @@ fun SoraCodeEditor(
 
                 subscribeEvent<ContentChangeEvent> { _, _ ->
                     viewModel.onContentChanged()
+                }
+
+                subscribeEvent<SelectionChangeEvent> { _, _ ->
+                    val line = cursor.leftLine
+                    val column = cursor.leftColumn
+                    ensurePositionVisible(line, column)
+                    if (bringIntoViewRequester != null) {
+                        val paint = textPaint
+                        val fontMetrics = paint.fontMetrics
+                        val lineHeight = fontMetrics.descent - fontMetrics.ascent
+                        val cursorY = line * lineHeight
+                        val localY = cursorY - scrollY
+                        coroutineScope.launch {
+                            bringIntoViewRequester.bringIntoView(
+                                rect = androidx.compose.ui.geometry.Rect(
+                                    left = 0f,
+                                    top = localY,
+                                    right = 0f,
+                                    bottom = localY + lineHeight
+                                )
+                            )
+                        }
+                    }
                 }
 
                 viewModel.registerEditorForFile(file.uri.toString(), this)
@@ -794,10 +887,13 @@ fun SplitPaneContent(
                     isActive = state.selectedFileIndex == state.splitLeftIndex,
                     onSelect = { index -> viewModel.setSplitLeft(index) },
                 )
+                val leftBringIntoViewRequester = remember { BringIntoViewRequester() }
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
+                        .imePadding()
+                        .bringIntoViewRequester(leftBringIntoViewRequester)
                 ) {
                     key(leftFile.uri) {
                         SoraCodeEditor(
@@ -806,6 +902,7 @@ fun SplitPaneContent(
                             wordWrap = state.wordWrapEnabled,
                             searchQuery = state.searchQuery,
                             isSearchVisible = state.isSearchVisible,
+                            bringIntoViewRequester = leftBringIntoViewRequester,
                         )
                     }
                 }
@@ -830,10 +927,13 @@ fun SplitPaneContent(
                     isActive = state.selectedFileIndex == state.splitRightIndex,
                     onSelect = { index -> viewModel.setSplitRight(index) },
                 )
+                val rightBringIntoViewRequester = remember { BringIntoViewRequester() }
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
+                        .imePadding()
+                        .bringIntoViewRequester(rightBringIntoViewRequester)
                 ) {
                     key(rightFile.uri) {
                         SoraCodeEditor(
@@ -842,6 +942,7 @@ fun SplitPaneContent(
                             wordWrap = state.wordWrapEnabled,
                             searchQuery = state.searchQuery,
                             isSearchVisible = state.isSearchVisible,
+                            bringIntoViewRequester = rightBringIntoViewRequester,
                         )
                     }
                 }
