@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import java.lang.ref.WeakReference
 
 // UI State
@@ -50,6 +51,9 @@ sealed class EditorUiState {
         // Split-pane mode (landscape): which file index goes in each pane
         val splitLeftIndex: Int = 0,
         val splitRightIndex: Int = 1,
+        // Custom save dialog
+        val showSaveDialogForFile: EditorFile? = null,
+        val closeAfterSave: Boolean = false,
     ) : EditorUiState()
 }
 
@@ -77,6 +81,7 @@ class EditorViewModel(
 
     val overlayDuration: StateFlow<Float> = settingsRepository.overlayDuration
     val hideSystemBarsInLandscape: StateFlow<Boolean> = settingsRepository.hideSystemBarsInLandscape
+    val showFileExtensions: StateFlow<Boolean> = settingsRepository.showFileExtensions
 
     // Navigation events
     sealed interface NavigationEvent {
@@ -371,6 +376,144 @@ class EditorViewModel(
         }
     }
 
+    fun createNewFile() {
+        viewModelScope.launch {
+            val prevState = _uiState.value as? EditorUiState.Ready
+            val currentFiles = prevState?.openFiles ?: emptyList()
+            val isWordWrap = prevState?.wordWrapEnabled ?: false
+            val histEnabled = settingsRepository.getVersionHistoryPreference()
+
+            val tempUri = Uri.parse("syntaxtor://new-file/untitled_${System.currentTimeMillis()}")
+            val newFile = EditorFile(
+                uri = tempUri,
+                name = "untitled",
+                content = "",
+                isModified = false,
+                fileType = ".txt"
+            )
+
+            val newFiles = currentFiles + newFile
+            val newSplitLeft = (prevState?.splitLeftIndex ?: 0).coerceIn(0, newFiles.lastIndex)
+            val newSplitRight = newFiles.lastIndex
+            
+            _uiState.value = EditorUiState.Ready(
+                openFiles = newFiles,
+                selectedFileIndex = newFiles.lastIndex,
+                wordWrapEnabled = isWordWrap,
+                isVersionHistoryEnabled = histEnabled,
+                splitLeftIndex = newSplitLeft,
+                splitRightIndex = newSplitRight
+            )
+            _navigationEvent.emit(NavigationEvent.NavigateToEditor)
+        }
+    }
+
+    fun triggerSaveDialog(uri: String, closeAfterSave: Boolean) {
+        val state = _uiState.value as? EditorUiState.Ready ?: return
+        val file = state.openFiles.find { it.uri.toString() == uri } ?: return
+        _uiState.update {
+            state.copy(
+                showSaveDialogForFile = file,
+                closeAfterSave = closeAfterSave,
+                filePendingClose = null
+            )
+        }
+    }
+
+    fun cancelSaveDialog() {
+        _uiState.update { state ->
+            if (state is EditorUiState.Ready) {
+                state.copy(showSaveDialogForFile = null, closeAfterSave = false)
+            } else {
+                state
+            }
+        }
+    }
+
+    fun saveNewFile(uriString: String, nameInput: String, extensionInput: String, closeAfterSave: Boolean) {
+        val state = _uiState.value as? EditorUiState.Ready ?: return
+        val fileIndex = state.openFiles.indexOfFirst { it.uri.toString() == uriString }
+        if (fileIndex < 0) return
+        val tempFile = state.openFiles[fileIndex]
+        val latestContent = currentEditor()?.text?.toString() ?: tempFile.content
+
+        viewModelScope.launch {
+            try {
+                val parentDir = File(
+                    android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_DOCUMENTS
+                    ),
+                    "Syntaxtor"
+                )
+                if (!parentDir.exists()) {
+                    parentDir.mkdirs()
+                }
+
+                val ext = if (extensionInput.startsWith(".")) extensionInput else ".$extensionInput"
+                val baseName = if (nameInput.isBlank()) "SynDoc" else nameInput
+
+                var targetFile = File(parentDir, "$baseName$ext")
+                if (targetFile.exists()) {
+                    var counter = 1
+                    while (true) {
+                        targetFile = File(parentDir, "$baseName($counter)$ext")
+                        if (!targetFile.exists()) {
+                            break
+                        }
+                        counter++
+                    }
+                }
+
+                targetFile.writeText(latestContent)
+
+                val newUri = Uri.fromFile(targetFile)
+                val newName = targetFile.name
+                val finalExt = targetFile.extension
+                val fileType = if (finalExt.isNotEmpty()) ".$finalExt".lowercase() else ""
+
+                val savedFile = EditorFile(
+                    uri = newUri,
+                    name = newName,
+                    content = latestContent,
+                    isModified = false,
+                    fileType = fileType
+                )
+
+                val updatedFiles = state.openFiles.toMutableList()
+                updatedFiles[fileIndex] = savedFile
+
+                editorRefs.remove(uriString)
+                addRecentFileUseCase(newUri.toString(), newName, fileType)
+
+                if (state.isVersionHistoryEnabled) {
+                    saveCheckpointUseCase(newUri.toString(), latestContent)
+                }
+
+                _uiState.update { s ->
+                    if (s is EditorUiState.Ready) {
+                        s.copy(
+                            openFiles = updatedFiles,
+                            showSaveDialogForFile = null,
+                            closeAfterSave = false
+                        )
+                    } else {
+                        s
+                    }
+                }
+
+                if (closeAfterSave) {
+                    closeFile(newUri.toString())
+                    _snackbarMessage.emit("File Created & Closed")
+                } else {
+                    startObservingHistory(newUri.toString())
+                    _snackbarMessage.emit("File Saved to Documents/Syntaxtor")
+                }
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Error saving file: ${e.message}")
+            }
+        }
+    }
+
     /**
      * Saves the current file.
      * If version history is enabled, also creates a checkpoint.
@@ -382,28 +525,37 @@ class EditorViewModel(
         val file = state.openFiles[state.selectedFileIndex]
         val latestContent = currentEditor()?.text?.toString() ?: file.content
 
-        _uiState.update { (it as? EditorUiState.Ready)?.copy(isSaving = true) ?: it }
+        if (file.uri.scheme == "syntaxtor") {
+            _uiState.update {
+                state.copy(
+                    showSaveDialogForFile = file,
+                    closeAfterSave = false
+                )
+            }
+        } else {
+            _uiState.update { (it as? EditorUiState.Ready)?.copy(isSaving = true) ?: it }
 
-        viewModelScope.launch {
-            saveFileUseCase(file.copy(content = latestContent)).onSuccess {
-                val updatedFile = file.copy(content = latestContent, isModified = false)
-                _uiState.update { s ->
-                    (s as? EditorUiState.Ready)?.copy(
-                        openFiles = s.openFiles.toMutableList().apply {
-                            set(s.selectedFileIndex, updatedFile)
-                        },
-                        isSaving = false
-                    ) ?: s
-                }
+            viewModelScope.launch {
+                saveFileUseCase(file.copy(content = latestContent)).onSuccess {
+                    val updatedFile = file.copy(content = latestContent, isModified = false)
+                    _uiState.update { s ->
+                        (s as? EditorUiState.Ready)?.copy(
+                            openFiles = s.openFiles.toMutableList().apply {
+                                set(s.selectedFileIndex, updatedFile)
+                            },
+                            isSaving = false
+                        ) ?: s
+                    }
 
-                // Save checkpoint if history is enabled
-                if (state.isVersionHistoryEnabled) {
-                    saveCheckpointUseCase(file.uri.toString(), latestContent)
-                }
-                _snackbarMessage.emit("File Saved")
-            }.onFailure {
-                _uiState.update { s ->
-                    (s as? EditorUiState.Ready)?.copy(isSaving = false) ?: s
+                    // Save checkpoint if history is enabled
+                    if (state.isVersionHistoryEnabled) {
+                        saveCheckpointUseCase(file.uri.toString(), latestContent)
+                    }
+                    _snackbarMessage.emit("File Saved")
+                }.onFailure {
+                    _uiState.update { s ->
+                        (s as? EditorUiState.Ready)?.copy(isSaving = false) ?: s
+                    }
                 }
             }
         }

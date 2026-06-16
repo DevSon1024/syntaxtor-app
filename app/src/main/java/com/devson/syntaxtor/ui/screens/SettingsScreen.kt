@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -60,6 +61,7 @@ fun SettingsScreen(
     val historyEnabled by viewModel.versionHistoryEnabled.collectAsState()
     val overlayDuration by viewModel.overlayDuration.collectAsState()
     val hideSystemBarsInLandscape by viewModel.hideSystemBarsInLandscape.collectAsState()
+    val showFileExtensions by viewModel.showFileExtensions.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showThemeDialog by remember { mutableStateOf(false) }
@@ -112,22 +114,37 @@ fun SettingsScreen(
                 ),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                ListItem(
-                    headlineContent = { Text("Theme Selection") },
-                    supportingContent = {
-                        Text(
-                            when (themeMode) {
-                                "LIGHT" -> "Light"
-                                "DARK" -> "Dark"
-                                else -> "System default"
-                            }
-                        )
-                    },
-                    leadingContent = {
-                        Icon(Icons.Default.Palette, contentDescription = null)
-                    },
-                    modifier = Modifier.clickable { showThemeDialog = true }
-                )
+                Column {
+                    ListItem(
+                        headlineContent = { Text("Theme Selection") },
+                        supportingContent = {
+                            Text(
+                                when (themeMode) {
+                                    "LIGHT" -> "Light"
+                                    "DARK" -> "Dark"
+                                    else -> "System default"
+                                }
+                            )
+                        },
+                        leadingContent = {
+                            Icon(Icons.Default.Palette, contentDescription = null)
+                        },
+                        modifier = Modifier.clickable { showThemeDialog = true }
+                    )
+                    ListItem(
+                        headlineContent = { Text("Show File Extensions") },
+                        supportingContent = { Text("Display file extension suffixes in lists and editor tabs.") },
+                        leadingContent = {
+                            Icon(Icons.Default.Description, contentDescription = null)
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = showFileExtensions,
+                                onCheckedChange = { viewModel.setShowFileExtensions(it) }
+                            )
+                        }
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))

@@ -9,11 +9,20 @@ class SafFileManager(private val context: Context) : FileRepository {
     
     override suspend fun readFile(uri: Uri): Result<EditorFile> {
         return try {
-            val content = context.contentResolver.openInputStream(uri)?.use { 
-                it.bufferedReader().readText() 
-            } ?: throw Exception("Cannot read file")
+            val content = if (uri.scheme == "file") {
+                val file = java.io.File(uri.path ?: throw Exception("Invalid path"))
+                file.readText()
+            } else {
+                context.contentResolver.openInputStream(uri)?.use {
+                    it.bufferedReader().readText()
+                } ?: throw Exception("Cannot read file")
+            }
             
-            val name = uri.lastPathSegment ?: "unknown"
+            val name = if (uri.scheme == "file") {
+                java.io.File(uri.path!!).name
+            } else {
+                uri.lastPathSegment ?: "unknown"
+            }
             val extension = name.substringAfterLast('.', "")
             val fileType = if (extension.isNotEmpty()) ".$extension".lowercase() else ""
             
@@ -25,9 +34,18 @@ class SafFileManager(private val context: Context) : FileRepository {
 
     override suspend fun writeFile(uri: Uri, content: String): Result<Unit> {
         return try {
-            context.contentResolver.openOutputStream(uri, "wt")?.use {
-                it.write(content.toByteArray())
-            } ?: throw Exception("Cannot write file")
+            if (uri.scheme == "file") {
+                val file = java.io.File(uri.path ?: throw Exception("Invalid path"))
+                val parent = file.parentFile
+                if (parent != null && !parent.exists()) {
+                    parent.mkdirs()
+                }
+                file.writeText(content)
+            } else {
+                context.contentResolver.openOutputStream(uri, "wt")?.use {
+                    it.write(content.toByteArray())
+                } ?: throw Exception("Cannot write file")
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

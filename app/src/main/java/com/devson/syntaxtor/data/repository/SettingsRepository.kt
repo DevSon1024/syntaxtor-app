@@ -21,6 +21,9 @@ class SettingsRepository(context: Context) {
     private val _hideSystemBarsInLandscape = MutableStateFlow(getHideSystemBarsInLandscapePreference())
     val hideSystemBarsInLandscape: StateFlow<Boolean> = _hideSystemBarsInLandscape.asStateFlow()
 
+    private val _showFileExtensions = MutableStateFlow(getShowFileExtensionsPreference())
+    val showFileExtensions: StateFlow<Boolean> = _showFileExtensions.asStateFlow()
+
     fun getThemePreference(): String {
         return prefs.getString("key_theme", "SYSTEM") ?: "SYSTEM"
     }
@@ -55,5 +58,14 @@ class SettingsRepository(context: Context) {
     fun setHideSystemBarsInLandscapePreference(hide: Boolean) {
         prefs.edit().putBoolean("key_hide_system_bars_landscape", hide).apply()
         _hideSystemBarsInLandscape.value = hide
+    }
+
+    fun getShowFileExtensionsPreference(): Boolean {
+        return prefs.getBoolean("key_show_file_extensions", true)
+    }
+
+    fun setShowFileExtensionsPreference(show: Boolean) {
+        prefs.edit().putBoolean("key_show_file_extensions", show).apply()
+        _showFileExtensions.value = show
     }
 }

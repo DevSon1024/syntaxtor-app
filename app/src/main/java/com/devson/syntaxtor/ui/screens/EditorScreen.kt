@@ -115,6 +115,7 @@ fun EditorScreen(
     val currentFile = readyState?.openFiles?.getOrNull(readyState.selectedFileIndex)
 
     // Unsaved changes back logic
+    val showFileExtensions by viewModel.showFileExtensions.collectAsState()
     val handleBack: () -> Unit = {
         if (currentFile?.isModified == true) {
             viewModel.requestCloseFile(currentFile.uri.toString())
@@ -160,30 +161,105 @@ fun EditorScreen(
     // Unsaved Changes Confirmation Dialog
     val filePendingClose = readyState?.filePendingClose
     if (filePendingClose != null) {
-        AlertDialog(
-            onDismissRequest = { viewModel.cancelCloseFile() },
-            title = { Text("Unsaved Changes") },
-            text = { Text("Do you want to save changes to \"${filePendingClose.name.formatAsFileName()}\" before closing?") },
-            confirmButton = {
-                TextButton(
-                    onClick = { viewModel.saveAndCloseFile(filePendingClose.uri.toString()) }
-                ) {
-                    Text("Save & Close")
-                }
-            },
-            dismissButton = {
-                Row {
+        if (filePendingClose.uri.scheme == "syntaxtor") {
+            AlertDialog(
+                onDismissRequest = { viewModel.cancelCloseFile() },
+                title = { Text("Unsaved Changes") },
+                text = { Text("Do you want to save \"${filePendingClose.name}\" before closing?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = { viewModel.triggerSaveDialog(filePendingClose.uri.toString(), closeAfterSave = true) }
+                    ) {
+                        Text("Save & Close")
+                    }
+                },
+                dismissButton = {
                     TextButton(
                         onClick = { viewModel.discardAndCloseFile(filePendingClose.uri.toString()) }
                     ) {
-                        Text("Close Without Saving", color = MaterialTheme.colorScheme.error)
+                        Text("Discard", color = MaterialTheme.colorScheme.error)
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
+                }
+            )
+        } else {
+            AlertDialog(
+                onDismissRequest = { viewModel.cancelCloseFile() },
+                title = { Text("Unsaved Changes") },
+                text = { Text("Do you want to save changes to \"${filePendingClose.name.formatAsFileName(showFileExtensions)}\" before closing?") },
+                confirmButton = {
                     TextButton(
-                        onClick = { viewModel.cancelCloseFile() }
+                        onClick = { viewModel.saveAndCloseFile(filePendingClose.uri.toString()) }
                     ) {
-                        Text("Cancel")
+                        Text("Save & Close")
                     }
+                },
+                dismissButton = {
+                    Row {
+                        TextButton(
+                            onClick = { viewModel.discardAndCloseFile(filePendingClose.uri.toString()) }
+                        ) {
+                            Text("Close Without Saving", color = MaterialTheme.colorScheme.error)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(
+                            onClick = { viewModel.cancelCloseFile() }
+                        ) {
+                            Text("Cancel")
+                        }
+                    }
+                }
+            )
+        }
+    }
+
+    // Custom Save Dialog for New Files
+    val showSaveDialogForFile = readyState?.showSaveDialogForFile
+    if (showSaveDialogForFile != null) {
+        var fileName by remember { mutableStateOf("") }
+        var extension by remember { mutableStateOf(".txt") }
+
+        AlertDialog(
+            onDismissRequest = { viewModel.cancelSaveDialog() },
+            title = { Text("Save File") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = fileName,
+                        onValueChange = { fileName = it },
+                        label = { Text("File Name") },
+                        placeholder = { Text("SynDoc") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = extension,
+                        onValueChange = { extension = it },
+                        label = { Text("Extension") },
+                        placeholder = { Text(".txt") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.saveNewFile(
+                            uriString = showSaveDialogForFile.uri.toString(),
+                            nameInput = fileName,
+                            extensionInput = extension,
+                            closeAfterSave = readyState.closeAfterSave
+                        )
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.cancelSaveDialog() }
+                ) {
+                    Text("Cancel")
                 }
             }
         )
@@ -202,6 +278,7 @@ fun EditorScreen(
         topBar = {
             EditorTopBar(
                 uiState = uiState,
+                showFileExtensions = showFileExtensions,
                 onSave = { viewModel.saveCurrentFile() },
                 onOpenFile = onOpenFileSelection,
                 isPreviewVisible = isPreviewVisible,
@@ -246,6 +323,7 @@ fun EditorScreen(
                         SplitPaneContent(
                             state = state,
                             viewModel = viewModel,
+                            showFileExtensions = showFileExtensions,
                             onSearchQueryChange = { viewModel.updateSearchQuery(it) },
                             onNextMatch = { viewModel.nextSearchMatch() },
                             onPrevMatch = { viewModel.previousSearchMatch() },
@@ -442,6 +520,7 @@ fun EditorScreen(
 @Composable
 fun EditorTopBar(
     uiState: EditorUiState,
+    showFileExtensions: Boolean,
     onSave: () -> Unit,
     onOpenFile: () -> Unit,
     isPreviewVisible: Boolean,
@@ -516,6 +595,7 @@ fun EditorTopBar(
             TabBar(
                 files = files,
                 selectedIndex = selectedIndex,
+                showFileExtensions = showFileExtensions,
                 onTabSelected = onTabSelected,
                 onTabClosed = onTabClosed,
             )
@@ -794,6 +874,7 @@ fun SearchBar(
 fun TabBar(
     files: List<EditorFile>,
     selectedIndex: Int,
+    showFileExtensions: Boolean,
     onTabSelected: (Int) -> Unit,
     onTabClosed: (Int) -> Unit,
 ) {
@@ -824,7 +905,7 @@ fun TabBar(
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = file.name.formatAsFileName() + if (file.isModified) " •" else "",
+                            text = file.name.formatAsFileName(showFileExtensions) + if (file.isModified) " •" else "",
                             maxLines = 1,
                             fontFamily = FontFamily.Monospace,
                             fontSize = 12.sp,
@@ -877,6 +958,7 @@ fun CenterText(text: String) {
 fun SplitPaneContent(
     state: EditorUiState.Ready,
     viewModel: EditorViewModel,
+    showFileExtensions: Boolean,
     onSearchQueryChange: (String) -> Unit,
     onNextMatch: () -> Unit,
     onPrevMatch: () -> Unit,
@@ -916,6 +998,7 @@ fun SplitPaneContent(
                     files = state.openFiles,
                     selectedIndex = state.splitLeftIndex,
                     isActive = state.selectedFileIndex == state.splitLeftIndex,
+                    showFileExtensions = showFileExtensions,
                     onSelect = { index -> viewModel.setSplitLeft(index) },
                 )
                 val leftBringIntoViewRequester = remember { BringIntoViewRequester() }
@@ -956,6 +1039,7 @@ fun SplitPaneContent(
                     files = state.openFiles,
                     selectedIndex = state.splitRightIndex,
                     isActive = state.selectedFileIndex == state.splitRightIndex,
+                    showFileExtensions = showFileExtensions,
                     onSelect = { index -> viewModel.setSplitRight(index) },
                 )
                 val rightBringIntoViewRequester = remember { BringIntoViewRequester() }
@@ -987,6 +1071,7 @@ fun PaneSelectorChip(
     files: List<EditorFile>,
     selectedIndex: Int,
     isActive: Boolean,
+    showFileExtensions: Boolean,
     onSelect: (Int) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -1008,7 +1093,7 @@ fun PaneSelectorChip(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = file?.name?.formatAsFileName()?.let {
+                    text = file?.name?.formatAsFileName(showFileExtensions)?.let {
                         it + if (file.isModified) " •" else ""
                     } ?: "—",
                     style = MaterialTheme.typography.labelMedium.copy(
@@ -1040,7 +1125,7 @@ fun PaneSelectorChip(
                 DropdownMenuItem(
                     text = {
                         Text(
-                            text = f.name.formatAsFileName() + if (f.isModified) " •" else "",
+                            text = f.name.formatAsFileName(showFileExtensions) + if (f.isModified) " •" else "",
                             fontFamily = FontFamily.Monospace,
                             fontSize = 13.sp,
                         )

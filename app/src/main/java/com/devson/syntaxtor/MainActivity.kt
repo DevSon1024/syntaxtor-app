@@ -38,6 +38,7 @@ import com.devson.syntaxtor.ui.theme.SyntaxtorTheme
 import com.devson.syntaxtor.viewmodel.EditorViewModel
 import com.devson.syntaxtor.viewmodel.HomeViewModel
 import com.devson.syntaxtor.viewmodel.SettingsViewModel
+import com.devson.syntaxtor.data.repository.NoteRepository
 
 class MainActivity : ComponentActivity() {
 
@@ -76,6 +77,9 @@ class MainActivity : ComponentActivity() {
         val getHistoryUseCase = GetHistoryUseCase(historyRepository)
         val restoreVersionUseCase = RestoreVersionUseCase(historyRepository)
 
+        // Note Repository
+        val noteRepository = NoteRepository(db.noteDao())
+
         // Recent files
         val recentFilesRepository = RecentFilesRepository(db.recentFileDao())
         val getRecentFilesUseCase = GetRecentFilesUseCase(recentFilesRepository)
@@ -101,6 +105,8 @@ class MainActivity : ComponentActivity() {
                 HomeViewModel(
                     getRecentFilesUseCase = getRecentFilesUseCase,
                     recentFilesRepository = recentFilesRepository,
+                    noteRepository = noteRepository,
+                    settingsRepository = settingsRepository,
                 )
             }
             initializer {

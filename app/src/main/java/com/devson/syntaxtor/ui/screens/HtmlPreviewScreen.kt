@@ -33,6 +33,7 @@ fun HtmlPreviewScreen(
     fileUri: String
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val showFileExtensions by viewModel.showFileExtensions.collectAsState()
     val readyState = uiState as? EditorUiState.Ready
     val file = readyState?.openFiles?.find { it.uri.toString() == fileUri }
     val fileName = file?.name ?: fileUri.substringAfterLast('/').substringAfterLast(':')
@@ -43,7 +44,7 @@ fun HtmlPreviewScreen(
             CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        text = fileName.formatAsFileName(),
+                        text = fileName.formatAsFileName(showFileExtensions),
                         maxLines = 1,
                         fontSize = 14.sp,
                         fontFamily = FontFamily.Monospace
