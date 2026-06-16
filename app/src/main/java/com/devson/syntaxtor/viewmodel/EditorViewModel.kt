@@ -82,6 +82,7 @@ class EditorViewModel(
     val overlayDuration: StateFlow<Float> = settingsRepository.overlayDuration
     val hideSystemBarsInLandscape: StateFlow<Boolean> = settingsRepository.hideSystemBarsInLandscape
     val showFileExtensions: StateFlow<Boolean> = settingsRepository.showFileExtensions
+    val zenModeEnabled: StateFlow<Boolean> = settingsRepository.zenModeEnabled
 
     // Navigation events
     sealed interface NavigationEvent {

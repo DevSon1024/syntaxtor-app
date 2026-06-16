@@ -24,6 +24,9 @@ class SettingsRepository(context: Context) {
     private val _showFileExtensions = MutableStateFlow(getShowFileExtensionsPreference())
     val showFileExtensions: StateFlow<Boolean> = _showFileExtensions.asStateFlow()
 
+    private val _zenModeEnabled = MutableStateFlow(getZenModePreference())
+    val zenModeEnabled: StateFlow<Boolean> = _zenModeEnabled.asStateFlow()
+
     fun getThemePreference(): String {
         return prefs.getString("key_theme", "SYSTEM") ?: "SYSTEM"
     }
@@ -67,5 +70,14 @@ class SettingsRepository(context: Context) {
     fun setShowFileExtensionsPreference(show: Boolean) {
         prefs.edit().putBoolean("key_show_file_extensions", show).apply()
         _showFileExtensions.value = show
+    }
+
+    fun getZenModePreference(): Boolean {
+        return prefs.getBoolean("key_zen_mode", true)
+    }
+
+    fun setZenModePreference(enabled: Boolean) {
+        prefs.edit().putBoolean("key_zen_mode", enabled).apply()
+        _zenModeEnabled.value = enabled
     }
 }

@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -62,6 +63,7 @@ fun SettingsScreen(
     val overlayDuration by viewModel.overlayDuration.collectAsState()
     val hideSystemBarsInLandscape by viewModel.hideSystemBarsInLandscape.collectAsState()
     val showFileExtensions by viewModel.showFileExtensions.collectAsState()
+    val zenModeEnabled by viewModel.zenModeEnabled.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showThemeDialog by remember { mutableStateOf(false) }
@@ -164,19 +166,34 @@ fun SettingsScreen(
                 ),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                ListItem(
-                    headlineContent = { Text("Immersive Landscape Mode") },
-                    supportingContent = { Text("Hide status and navigation bars dynamically in landscape mode.") },
-                    leadingContent = {
-                        Icon(Icons.Default.Fullscreen, contentDescription = null)
-                    },
-                    trailingContent = {
-                        Switch(
-                            checked = hideSystemBarsInLandscape,
-                            onCheckedChange = { viewModel.setHideSystemBarsInLandscape(it) }
-                        )
-                    }
-                )
+                Column {
+                    ListItem(
+                        headlineContent = { Text("Immersive Landscape Mode") },
+                        supportingContent = { Text("Hide status and navigation bars dynamically in landscape mode.") },
+                        leadingContent = {
+                            Icon(Icons.Default.Fullscreen, contentDescription = null)
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = hideSystemBarsInLandscape,
+                                onCheckedChange = { viewModel.setHideSystemBarsInLandscape(it) }
+                            )
+                        }
+                    )
+                    ListItem(
+                        headlineContent = { Text("Zen Mode") },
+                        supportingContent = { Text("Automatically hide toolbars and buttons while typing for a distraction-free experience") },
+                        leadingContent = {
+                            Icon(Icons.Default.VisibilityOff, contentDescription = null)
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = zenModeEnabled,
+                                onCheckedChange = { viewModel.setZenModeEnabled(it) }
+                            )
+                        }
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))

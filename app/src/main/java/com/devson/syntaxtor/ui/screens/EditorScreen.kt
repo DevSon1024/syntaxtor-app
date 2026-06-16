@@ -92,6 +92,8 @@ fun EditorScreen(
     val hideSystemBarsInLandscape by viewModel.hideSystemBarsInLandscape.collectAsState()
     val orientation = LocalConfiguration.current.orientation
     val view = LocalView.current
+    val isZenModeEnabled by viewModel.zenModeEnabled.collectAsState()
+    val isZenModeActive = isZenModeEnabled && isImeVisible
 
     LaunchedEffect(orientation, hideSystemBarsInLandscape) {
         val activity = view.context as? Activity ?: return@LaunchedEffect
@@ -275,40 +277,50 @@ fun EditorScreen(
     }
 
     Scaffold(
-        topBar = {
-            EditorTopBar(
-                uiState = uiState,
-                showFileExtensions = showFileExtensions,
-                onSave = { viewModel.saveCurrentFile() },
-                onOpenFile = onOpenFileSelection,
-                isPreviewVisible = isPreviewVisible,
-                onPreviewToggle = {
-                    currentFile?.let { viewModel.triggerHtmlPreview(it.uri.toString()) }
-                },
-                onUndo = { viewModel.undo() },
-                onRedo = { viewModel.redo() },
-                onBackClick = handleBack,
-                onTabSelected = { index ->
-                    viewModel.selectTab(index)
-                    readyState?.openFiles?.getOrNull(index)?.let { file ->
-                        overlayText = file.name
-                    }
-                },
-                onTabClosed = { index ->
-                    readyState?.openFiles?.getOrNull(index)?.let { file ->
-                        viewModel.requestCloseFile(file.uri.toString())
-                    }
-                }
-            )
-        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0.dp),
     ) { paddingValues ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = paddingValues.calculateTopPadding())
         ) {
+            AnimatedVisibility(
+                visible = !isZenModeActive,
+                enter = slideInVertically(animationSpec = tween(300)) { -it } + fadeIn(animationSpec = tween(300)) + expandVertically(animationSpec = tween(300)),
+                exit = slideOutVertically(animationSpec = tween(300)) { -it } + fadeOut(animationSpec = tween(300)) + shrinkVertically(animationSpec = tween(300))
+            ) {
+                EditorTopBar(
+                    uiState = uiState,
+                    showFileExtensions = showFileExtensions,
+                    onSave = { viewModel.saveCurrentFile() },
+                    onOpenFile = onOpenFileSelection,
+                    isPreviewVisible = isPreviewVisible,
+                    onPreviewToggle = {
+                        currentFile?.let { viewModel.triggerHtmlPreview(it.uri.toString()) }
+                    },
+                    onUndo = { viewModel.undo() },
+                    onRedo = { viewModel.redo() },
+                    onBackClick = handleBack,
+                    onTabSelected = { index ->
+                        viewModel.selectTab(index)
+                        readyState?.openFiles?.getOrNull(index)?.let { file ->
+                            overlayText = file.name
+                        }
+                    },
+                    onTabClosed = { index ->
+                        readyState?.openFiles?.getOrNull(index)?.let { file ->
+                            viewModel.requestCloseFile(file.uri.toString())
+                        }
+                    }
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
             val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
             when (val state = uiState) {
                 is EditorUiState.Idle -> CenterText("No file opened.\nTap Open File button to begin.")
@@ -352,7 +364,7 @@ fun EditorScreen(
             }
 
             // Tab Full Name Overlay
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = overlayText != null,
                 enter = fadeIn() + slideInVertically { -it },
                 exit = fadeOut() + slideOutVertically { -it },
@@ -380,14 +392,18 @@ fun EditorScreen(
             }
 
             // Bottom Options Island
-            if (readyState != null && readyState.openFiles.isNotEmpty()) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = !isZenModeActive && readyState != null && readyState.openFiles.isNotEmpty(),
+                enter = slideInVertically(animationSpec = tween(300)) { it } + fadeIn(animationSpec = tween(300)),
+                exit = slideOutVertically(animationSpec = tween(300)) { it } + fadeOut(animationSpec = tween(300)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.ime)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(bottom = 16.dp)
+            ) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .windowInsetsPadding(WindowInsets.ime)
-                        .windowInsetsPadding(WindowInsets.navigationBars)
-                        .padding(bottom = 16.dp),
                     contentAlignment = if (isIslandExpanded) Alignment.Center else Alignment.CenterEnd
                 ) {
                     AnimatedContent(
@@ -418,7 +434,7 @@ fun EditorScreen(
                                         Icon(
                                             imageVector = Icons.Default.Search,
                                             contentDescription = "Find in File",
-                                            tint = if (readyState.isSearchVisible) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                                            tint = if (readyState?.isSearchVisible == true) MaterialTheme.colorScheme.primary else LocalContentColor.current
                                         )
                                     }
                                     Spacer(modifier = Modifier.width(12.dp))
@@ -426,13 +442,13 @@ fun EditorScreen(
                                         Icon(
                                             imageVector = Icons.AutoMirrored.Filled.WrapText,
                                             contentDescription = "Word Wrap",
-                                            tint = if (readyState.wordWrapEnabled) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                                            tint = if (readyState?.wordWrapEnabled == true) MaterialTheme.colorScheme.primary else LocalContentColor.current
                                         )
                                     }
                                     Spacer(modifier = Modifier.width(12.dp))
                                     IconButton(
                                         onClick = { viewModel.toggleHistorySheet() },
-                                        enabled = readyState.isVersionHistoryEnabled
+                                        enabled = readyState?.isVersionHistoryEnabled == true
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.History,
@@ -478,7 +494,7 @@ fun EditorScreen(
             }
 
             //  "Saving…" banner (slides in from top of content area) 
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = (uiState as? EditorUiState.Ready)?.isSaving == true,
                 enter = slideInVertically { -it } + fadeIn(),
                 exit = slideOutVertically { -it } + fadeOut(),
@@ -512,6 +528,7 @@ fun EditorScreen(
             }
         }
     }
+}
 }
 
 // Top App Bar - sleek M3 CenterAlignedTopAppBar with overflow menu
