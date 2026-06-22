@@ -40,6 +40,8 @@ import com.devson.syntaxtor.viewmodel.HomeViewModel
 import com.devson.syntaxtor.viewmodel.SettingsViewModel
 import com.devson.syntaxtor.data.repository.NoteRepository
 
+import com.devson.syntaxtor.data.repository.SessionRepository
+
 class MainActivity : ComponentActivity() {
 
     private lateinit var editorViewModel: EditorViewModel
@@ -85,6 +87,9 @@ class MainActivity : ComponentActivity() {
         val getRecentFilesUseCase = GetRecentFilesUseCase(recentFilesRepository)
         val addRecentFileUseCase = AddRecentFileUseCase(recentFilesRepository)
 
+        // Session persistence
+        val sessionRepository = SessionRepository(db.sessionDao())
+
         // Settings & preferences
         val settingsRepository = SettingsRepository(applicationContext)
         val clearHistoryUseCase = ClearHistoryUseCase(historyRepository)
@@ -99,6 +104,7 @@ class MainActivity : ComponentActivity() {
                     restoreVersionUseCase = restoreVersionUseCase,
                     addRecentFileUseCase = addRecentFileUseCase,
                     settingsRepository = settingsRepository,
+                    sessionRepository = sessionRepository,
                 )
             }
             initializer {

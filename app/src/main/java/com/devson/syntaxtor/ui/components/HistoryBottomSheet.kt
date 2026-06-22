@@ -1,5 +1,7 @@
 package com.devson.syntaxtor.ui.components
 
+import androidx.compose.ui.graphics.Color
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -161,6 +163,26 @@ private fun HistoryEntryRow(
         )
 
         Spacer(Modifier.width(8.dp))
+
+        if (entry.addedChars > 0) {
+            Text(
+                text = "+${entry.addedChars}",
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                color = Color(0xFF2E7D32), // Green
+                maxLines = 1
+            )
+            Spacer(Modifier.width(8.dp))
+        }
+
+        if (entry.removedChars > 0) {
+            Text(
+                text = "-${entry.removedChars}",
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                color = Color(0xFFC62828), // Red
+                maxLines = 1
+            )
+            Spacer(Modifier.width(8.dp))
+        }
 
         // Restore button
         FilledTonalIconButton(

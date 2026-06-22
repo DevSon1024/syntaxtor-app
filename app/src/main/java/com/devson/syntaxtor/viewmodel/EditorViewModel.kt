@@ -26,6 +26,9 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.lang.ref.WeakReference
 
+import com.devson.syntaxtor.data.repository.SessionRepository
+import com.devson.syntaxtor.data.db.entity.SessionFileEntity
+
 // UI State
 sealed class EditorUiState {
     object Idle : EditorUiState()
@@ -54,6 +57,7 @@ sealed class EditorUiState {
         // Custom save dialog
         val showSaveDialogForFile: EditorFile? = null,
         val closeAfterSave: Boolean = false,
+        val isMarkdownPreviewVisible: Boolean = false,
     ) : EditorUiState()
 }
 
@@ -66,10 +70,28 @@ class EditorViewModel(
     private val restoreVersionUseCase: RestoreVersionUseCase,
     private val addRecentFileUseCase: AddRecentFileUseCase,
     private val settingsRepository: SettingsRepository,
+    private val sessionRepository: SessionRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<EditorUiState>(EditorUiState.Idle)
     val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()
+
+    private val _liveMarkdownText = MutableStateFlow("")
+    val liveMarkdownText: StateFlow<String> = _liveMarkdownText.asStateFlow()
+
+    fun updateLiveText(text: String) {
+        _liveMarkdownText.value = text
+    }
+
+    fun toggleMarkdownPreview() {
+        _uiState.update { state ->
+            if (state is EditorUiState.Ready) {
+                state.copy(isMarkdownPreviewVisible = !state.isMarkdownPreviewVisible)
+            } else {
+                state
+            }
+        }
+    }
 
     private val editorRefs = HashMap<String, WeakReference<CodeEditor>>()
 
@@ -87,13 +109,70 @@ class EditorViewModel(
     // Navigation events
     sealed interface NavigationEvent {
         object NavigateToEditor : NavigationEvent
-        data class NavigateToPreview(val fileUri: String) : NavigationEvent
     }
 
     private val _navigationEvent = MutableSharedFlow<NavigationEvent>()
     val navigationEvent: SharedFlow<NavigationEvent> = _navigationEvent.asSharedFlow()
 
     init {
+        // Restore workspace session on start
+        viewModelScope.launch {
+            val sessionFiles = sessionRepository.getSessionFiles()
+            if (sessionFiles.isNotEmpty()) {
+                val restoredFiles = sessionFiles.map { entity ->
+                    EditorFile(
+                        uri = Uri.parse(entity.uriString),
+                        name = entity.name,
+                        content = entity.content,
+                        isModified = entity.isModified,
+                        fileType = entity.fileType
+                    )
+                }
+                val histEnabled = settingsRepository.getVersionHistoryPreference()
+                _uiState.value = EditorUiState.Ready(
+                    openFiles = restoredFiles,
+                    selectedFileIndex = 0,
+                    isVersionHistoryEnabled = histEnabled
+                )
+                _liveMarkdownText.value = restoredFiles[0].content
+                startObservingHistory(restoredFiles[0].uri.toString())
+            }
+        }
+
+        // Continuously cache workspace session
+        viewModelScope.launch {
+            var lastFiles: List<EditorFile>? = null
+            _uiState.collect { state ->
+                if (state is EditorUiState.Ready) {
+                    val currentFiles = state.openFiles
+                    if (currentFiles != lastFiles) {
+                        lastFiles = currentFiles
+                        val entities = currentFiles.mapIndexed { index, file ->
+                            val liveContent = if (index == state.selectedFileIndex) {
+                                currentEditor()?.text?.toString() ?: file.content
+                            } else {
+                                file.content
+                            }
+                            SessionFileEntity(
+                                uriString = file.uri.toString(),
+                                name = file.name,
+                                content = liveContent,
+                                isModified = file.isModified,
+                                fileType = file.fileType,
+                                tabIndex = index
+                            )
+                        }
+                        sessionRepository.saveSession(entities)
+                    }
+                } else if (state is EditorUiState.Idle) {
+                    if (lastFiles != null) {
+                        lastFiles = null
+                        sessionRepository.clearSession()
+                    }
+                }
+            }
+        }
+
         // React to version history enabled setting changes
         viewModelScope.launch {
             settingsRepository.versionHistoryEnabled.collect { enabled ->
@@ -108,45 +187,7 @@ class EditorViewModel(
         }
     }
 
-    // Get live content for file rendering (preview)
-    fun getLiveContent(uri: String): String {
-        val state = _uiState.value as? EditorUiState.Ready ?: return ""
-        val index = state.openFiles.indexOfFirst { it.uri.toString() == uri }
-        if (index < 0) return ""
-        val file = state.openFiles[index]
-        return if (index == state.selectedFileIndex) {
-            currentEditor()?.text?.toString() ?: file.content
-        } else {
-            file.content
-        }
-    }
 
-    fun triggerHtmlPreview(uriString: String) {
-        val state = _uiState.value as? EditorUiState.Ready ?: return
-        val index = state.openFiles.indexOfFirst { it.uri.toString() == uriString }
-        if (index >= 0) {
-            val file = state.openFiles[index]
-            val liveContent = if (index == state.selectedFileIndex) {
-                currentEditor()?.text?.toString() ?: file.content
-            } else {
-                file.content
-            }
-            val updatedFile = file.copy(content = liveContent)
-            _uiState.update { s ->
-                if (s is EditorUiState.Ready) {
-                    val newFiles = s.openFiles.toMutableList().apply {
-                        set(index, updatedFile)
-                    }
-                    s.copy(openFiles = newFiles)
-                } else {
-                    s
-                }
-            }
-        }
-        viewModelScope.launch {
-            _navigationEvent.emit(NavigationEvent.NavigateToPreview(uriString))
-        }
-    }
 
     //  File / Tab operations
 
@@ -171,6 +212,7 @@ class EditorViewModel(
                         _uiState.value = (prevState ?: EditorUiState.Ready()).copy(
                             selectedFileIndex = alreadyOpen
                         )
+                        _liveMarkdownText.value = currentFiles[alreadyOpen].content
                         startObservingHistory(file.uri.toString())
                         addRecentFileUseCase(file.uri.toString(), file.name, file.fileType)
                         _navigationEvent.emit(NavigationEvent.NavigateToEditor)
@@ -191,6 +233,7 @@ class EditorViewModel(
                         splitLeftIndex = newSplitLeft,
                         splitRightIndex = newSplitRight,
                     )
+                    _liveMarkdownText.value = file.content
                     startObservingHistory(file.uri.toString())
                     addRecentFileUseCase(file.uri.toString(), file.name, file.fileType)
                     _navigationEvent.emit(NavigationEvent.NavigateToEditor)
@@ -215,6 +258,7 @@ class EditorViewModel(
                     showHistorySheet = false,
                 )
             }
+            _liveMarkdownText.value = state.openFiles[index].content
             startObservingHistory(state.openFiles[index].uri.toString())
         }
     }
@@ -223,6 +267,7 @@ class EditorViewModel(
         (_uiState.value as? EditorUiState.Ready)?.let { state ->
             if (index !in state.openFiles.indices) return
             _uiState.update { state.copy(splitLeftIndex = index, selectedFileIndex = index) }
+            _liveMarkdownText.value = state.openFiles[index].content
             startObservingHistory(state.openFiles[index].uri.toString())
         }
     }
@@ -231,6 +276,7 @@ class EditorViewModel(
         (_uiState.value as? EditorUiState.Ready)?.let { state ->
             if (index !in state.openFiles.indices) return
             _uiState.update { state.copy(splitRightIndex = index, selectedFileIndex = index) }
+            _liveMarkdownText.value = state.openFiles[index].content
             startObservingHistory(state.openFiles[index].uri.toString())
         }
     }
@@ -405,6 +451,7 @@ class EditorViewModel(
                 splitLeftIndex = newSplitLeft,
                 splitRightIndex = newSplitRight
             )
+            _liveMarkdownText.value = ""
             _navigationEvent.emit(NavigationEvent.NavigateToEditor)
         }
     }
@@ -644,6 +691,7 @@ class EditorViewModel(
                     currentEditor()?.setText(restoredText)
                     // Mark as modified so the user sees there are unsaved changes
                     val updated = file.copy(content = restoredText, isModified = true)
+                    _liveMarkdownText.value = restoredText
                     _uiState.update { s ->
                         (s as? EditorUiState.Ready)?.copy(
                             openFiles = s.openFiles.toMutableList().apply {

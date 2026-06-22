@@ -152,6 +152,9 @@ dependencies {
     // WebView asset loader - allows HTML preview to resolve local CSS/JS siblings
     implementation("androidx.webkit:webkit:1.12.1")
 
+    // Native Markdown renderer
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.30.0")
+
     // Diff-utils for delta-based version history (pure Java, no transitive deps)
     implementation("io.github.java-diff-utils:java-diff-utils:4.12")
 

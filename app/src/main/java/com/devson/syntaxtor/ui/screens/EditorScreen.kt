@@ -1,5 +1,10 @@
 package com.devson.syntaxtor.ui.screens
 
+import com.devson.syntaxtor.ui.components.MarkdownPreviewPanel
+
+import androidx.compose.foundation.shape.CircleShape
+import com.devson.syntaxtor.ui.utils.repeatingClickable
+
 import android.content.res.Configuration
 import android.graphics.Typeface
 import androidx.activity.compose.BackHandler
@@ -77,7 +82,6 @@ fun EditorScreen(
     onOpenFileSelection: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var isPreviewVisible by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Keyboard and bottom options island states
@@ -295,10 +299,6 @@ fun EditorScreen(
                     showFileExtensions = showFileExtensions,
                     onSave = { viewModel.saveCurrentFile() },
                     onOpenFile = onOpenFileSelection,
-                    isPreviewVisible = isPreviewVisible,
-                    onPreviewToggle = {
-                        currentFile?.let { viewModel.triggerHtmlPreview(it.uri.toString()) }
-                    },
                     onUndo = { viewModel.undo() },
                     onRedo = { viewModel.redo() },
                     onBackClick = handleBack,
@@ -312,7 +312,9 @@ fun EditorScreen(
                         readyState?.openFiles?.getOrNull(index)?.let { file ->
                             viewModel.requestCloseFile(file.uri.toString())
                         }
-                    }
+                    },
+                    isMarkdownPreviewVisible = readyState?.isMarkdownPreviewVisible == true,
+                    onPreviewToggle = { viewModel.toggleMarkdownPreview() }
                 )
             }
 
@@ -331,7 +333,7 @@ fun EditorScreen(
                 is EditorUiState.Ready -> {
                     if (state.openFiles.isEmpty()) {
                         CenterText("No file opened.")
-                    } else if (isLandscape && state.openFiles.size >= 2) {
+                    } else if (isLandscape && state.openFiles.size >= 2 && !state.isMarkdownPreviewVisible) {
                         SplitPaneContent(
                             state = state,
                             viewModel = viewModel,
@@ -540,20 +542,19 @@ fun EditorTopBar(
     showFileExtensions: Boolean,
     onSave: () -> Unit,
     onOpenFile: () -> Unit,
-    isPreviewVisible: Boolean,
-    onPreviewToggle: () -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onBackClick: () -> Unit,
     onTabSelected: (Int) -> Unit,
     onTabClosed: (Int) -> Unit,
+    isMarkdownPreviewVisible: Boolean = false,
+    onPreviewToggle: () -> Unit = {},
 ) {
     val readyState = uiState as? EditorUiState.Ready
     val files = readyState?.openFiles ?: emptyList()
     val selectedIndex = readyState?.selectedFileIndex ?: -1
     val file = readyState?.openFiles?.getOrNull(selectedIndex)
-    val showPreview = file?.fileType?.let { it == ".html" || it == ".htm" } ?: false
-    var overflowExpanded by remember { mutableStateOf(false) }
+    val isMarkdownFile = file?.name?.endsWith(".md", ignoreCase = true) == true
 
     Column {
         CenterAlignedTopAppBar(
@@ -568,34 +569,35 @@ fun EditorTopBar(
             },
             //  Primary actions (always visible) 
             actions = {
-                IconButton(onClick = onUndo) {
-                    Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
-                }
-                IconButton(onClick = onRedo) {
-                    Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
-                }
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Undo,
+                    contentDescription = "Undo",
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .repeatingClickable { onUndo() }
+                        .padding(12.dp)
+                )
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Redo,
+                    contentDescription = "Redo",
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .repeatingClickable { onRedo() }
+                        .padding(12.dp)
+                )
                 IconButton(onClick = onSave) {
                     Icon(Icons.Default.Save, contentDescription = "Save")
                 }
 
-                // Overflow menu for extra actions (e.g. preview)
-                if (showPreview) {
-                    Box {
-                        IconButton(onClick = { overflowExpanded = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                        }
-                        DropdownMenu(
-                            expanded = overflowExpanded,
-                            onDismissRequest = { overflowExpanded = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Show preview") },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Visibility, null)
-                                },
-                                onClick = { overflowExpanded = false; onPreviewToggle() },
-                            )
-                        }
+                if (isMarkdownFile) {
+                    IconButton(onClick = onPreviewToggle) {
+                        Icon(
+                            imageVector = if (isMarkdownPreviewVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = "Toggle Preview",
+                            tint = if (isMarkdownPreviewVisible) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                        )
                     }
                 }
             },
@@ -632,6 +634,8 @@ fun EditorContent(
     onNextMatch: () -> Unit,
     onPrevMatch: () -> Unit,
 ) {
+    val liveMarkdownText by viewModel.liveMarkdownText.collectAsState()
+
     Column(modifier = Modifier.fillMaxSize()) {
         AnimatedVisibility(
             visible = state.isSearchVisible,
@@ -655,6 +659,8 @@ fun EditorContent(
         }
 
         val bringIntoViewRequester = remember { BringIntoViewRequester() }
+        val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -662,15 +668,45 @@ fun EditorContent(
                 .imePadding()
                 .bringIntoViewRequester(bringIntoViewRequester)
         ) {
-            key(currentFile.uri) {
-                SoraCodeEditor(
-                    file = currentFile,
-                    viewModel = viewModel,
-                    wordWrap = state.wordWrapEnabled,
-                    searchQuery = state.searchQuery,
-                    isSearchVisible = state.isSearchVisible,
-                    bringIntoViewRequester = bringIntoViewRequester,
-                )
+            if (isLandscape && state.isMarkdownPreviewVisible) {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        key(currentFile.uri) {
+                            SoraCodeEditor(
+                                file = currentFile,
+                                viewModel = viewModel,
+                                wordWrap = state.wordWrapEnabled,
+                                searchQuery = state.searchQuery,
+                                isSearchVisible = state.isSearchVisible,
+                                bringIntoViewRequester = bringIntoViewRequester,
+                            )
+                        }
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        MarkdownPreviewPanel(
+                            rawMarkdown = liveMarkdownText,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+            } else {
+                key(currentFile.uri) {
+                    SoraCodeEditor(
+                        file = currentFile,
+                        viewModel = viewModel,
+                        wordWrap = state.wordWrapEnabled,
+                        searchQuery = state.searchQuery,
+                        isSearchVisible = state.isSearchVisible,
+                        bringIntoViewRequester = bringIntoViewRequester,
+                    )
+                }
+
+                if (state.isMarkdownPreviewVisible) {
+                    MarkdownPreviewPanel(
+                        rawMarkdown = liveMarkdownText,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
     }
@@ -730,6 +766,7 @@ fun SoraCodeEditor(
 
                 subscribeEvent<ContentChangeEvent> { _, _ ->
                     viewModel.onContentChanged()
+                    viewModel.updateLiveText(text.toString())
                 }
 
                 subscribeEvent<SelectionChangeEvent> { _, _ ->

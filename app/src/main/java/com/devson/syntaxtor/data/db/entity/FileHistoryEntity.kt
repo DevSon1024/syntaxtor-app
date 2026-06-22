@@ -37,5 +37,8 @@ data class FileHistoryEntity(
     val patchJson: String,
 
     /** Whether this entry is a full-text snapshot. */
-    val isBaseSnapshot: Boolean
+    val isBaseSnapshot: Boolean,
+
+    val addedChars: Int = 0,
+    val removedChars: Int = 0
 )

@@ -4,6 +4,7 @@ import com.devson.syntaxtor.data.db.dao.HistoryDao
 import com.devson.syntaxtor.data.db.entity.FileHistoryEntity
 import com.github.difflib.DiffUtils
 import com.github.difflib.patch.Patch
+import com.github.difflib.patch.DeltaType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -47,6 +48,8 @@ class HistoryRepository(private val dao: HistoryDao) {
             val count = dao.countForFile(uri)
             val isBase = (count == 0) || (count % BASE_SNAPSHOT_INTERVAL == 0)
 
+            var addedChars = 0
+            var removedChars = 0
             val patchJson: String
             if (isBase) {
                 // Full-text baseline - no diffing needed.
@@ -61,6 +64,22 @@ class HistoryRepository(private val dao: HistoryDao) {
                 val currLines = currentContent.lines()
                 val patch = DiffUtils.diff(prevLines, currLines)
                 patchJson = serialisePatch(patch)
+
+                patch.deltas.forEach { delta ->
+                    when (delta.type) {
+                        DeltaType.INSERT -> {
+                            addedChars += delta.target.lines.sumOf { it.length }
+                        }
+                        DeltaType.DELETE -> {
+                            removedChars += delta.source.lines.sumOf { it.length }
+                        }
+                        DeltaType.CHANGE -> {
+                            addedChars += delta.target.lines.sumOf { it.length }
+                            removedChars += delta.source.lines.sumOf { it.length }
+                        }
+                        else -> {}
+                    }
+                }
             }
 
             val changedChars = if (isBase) currentContent.length else patchJson.length
@@ -72,7 +91,9 @@ class HistoryRepository(private val dao: HistoryDao) {
                     timestamp = System.currentTimeMillis(),
                     label = label,
                     patchJson = patchJson,
-                    isBaseSnapshot = isBase
+                    isBaseSnapshot = isBase,
+                    addedChars = addedChars,
+                    removedChars = removedChars
                 )
             )
         }
@@ -93,9 +114,7 @@ class HistoryRepository(private val dao: HistoryDao) {
             reconstructText(relevant, relevant.last().id)
         }
 
-    // -------------------------------------------------------------------------
     // Private helpers
-    // -------------------------------------------------------------------------
 
     /**
      * Given an ASCENDING list of history entries, reconstructs the content at [targetId].
